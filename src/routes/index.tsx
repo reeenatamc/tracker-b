@@ -133,7 +133,21 @@ function Today() {
 
 	function finishSession() {
 		if (!session) return;
+		/*
+		 * Sessions logged before the clock existed have no start time. Rather than
+		 * report no duration at all, fall back to the first set's timestamp — it
+		 * undercounts the warm-up, but it is a real measurement rather than a gap.
+		 */
+		const firstSetAt = sets
+			.filter((set) => set.sessionId === session.id)
+			.map((set) => (set as { updatedAt?: number }).updatedAt)
+			.filter(
+				(stamp): stamp is number => typeof stamp === "number" && stamp > 0,
+			)
+			.sort((a, b) => a - b)[0];
+
 		collections.sessions.update(session.id, (draft) => {
+			draft.startedAt ??= firstSetAt ?? null;
 			draft.endedAt = Date.now();
 			draft.completed = true;
 		});

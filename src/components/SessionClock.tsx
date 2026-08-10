@@ -27,6 +27,13 @@ export function SessionClock({
 	/** False before anything is logged — there is no session to close yet. */
 	canFinish: boolean;
 }) {
+	/*
+	 * A session with sets in it is underway whether or not a start time was ever
+	 * recorded. Sessions logged before this clock existed have none, and treating
+	 * a missing timestamp as "not started" left them stuck offering "Empezar"
+	 * with no way to close a workout that was plainly finished.
+	 */
+	const underway = (startedAt !== null || canFinish) && endedAt === null;
 	const running = startedAt !== null && endedAt === null;
 	const [now, setNow] = useState(() => Date.now());
 
@@ -36,15 +43,17 @@ export function SessionClock({
 		return () => clearInterval(id);
 	}, [running]);
 
-	if (endedAt !== null && startedAt !== null) {
+	if (endedAt !== null) {
 		return (
 			<p className="eyebrow px-2">
-				Sesión de {Math.max(1, Math.round((endedAt - startedAt) / 60_000))} min
+				{startedAt === null
+					? "Sesión terminada"
+					: `Sesión de ${Math.max(1, Math.round((endedAt - startedAt) / 60_000))} min`}
 			</p>
 		);
 	}
 
-	if (!running) {
+	if (!underway) {
 		return (
 			<button
 				type="button"
@@ -59,10 +68,17 @@ export function SessionClock({
 	return (
 		<div className="flex items-center gap-3">
 			<p className="tabular flex-1 text-sm text-muted">
-				<span className="font-semibold text-ink">
-					{elapsed(now - (startedAt ?? now))}
-				</span>{" "}
-				en curso
+				{running ? (
+					<>
+						<span className="font-semibold text-ink">
+							{elapsed(now - (startedAt ?? now))}
+						</span>{" "}
+						en curso
+					</>
+				) : (
+					// Underway but never clocked in: there is no elapsed time to show.
+					<span className="text-muted">Sesión en curso</span>
+				)}
 			</p>
 			<button
 				type="button"
