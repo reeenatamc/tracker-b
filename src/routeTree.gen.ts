@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnkleRouteImport } from './routes/ankle'
 import { Route as HistoryRouteImport } from './routes/history'
+import { Route as InspoRouteImport } from './routes/inspo'
+import { Route as ProgressRouteImport } from './routes/progress'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +30,53 @@ const HistoryRoute = HistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InspoRoute = InspoRouteImport.update({
+  id: '/inspo',
+  path: '/inspo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProgressRoute = ProgressRouteImport.update({
+  id: '/progress',
+  path: '/progress',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
+  '/inspo': typeof InspoRoute
+  '/progress': typeof ProgressRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
+  '/inspo': typeof InspoRoute
+  '/progress': typeof ProgressRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
+  '/inspo': typeof InspoRoute
+  '/progress': typeof ProgressRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/ankle' | '/history'
+  fullPaths: '/' | '/ankle' | '/history' | '/inspo' | '/progress'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/ankle' | '/history'
-  id: '__root__' | '/' | '/ankle' | '/history'
+  to: '/' | '/ankle' | '/history' | '/inspo' | '/progress'
+  id: '__root__' | '/' | '/ankle' | '/history' | '/inspo' | '/progress'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnkleRoute: typeof AnkleRoute
   HistoryRoute: typeof HistoryRoute
+  InspoRoute: typeof InspoRoute
+  ProgressRoute: typeof ProgressRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +102,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inspo': {
+      id: '/inspo'
+      path: '/inspo'
+      fullPath: '/inspo'
+      preLoaderRoute: typeof InspoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/progress': {
+      id: '/progress'
+      path: '/progress'
+      fullPath: '/progress'
+      preLoaderRoute: typeof ProgressRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +123,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnkleRoute: AnkleRoute,
   HistoryRoute: HistoryRoute,
+  InspoRoute: InspoRoute,
+  ProgressRoute: ProgressRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

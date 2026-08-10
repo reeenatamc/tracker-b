@@ -202,6 +202,10 @@ export const SessionRecord = z.object({
 	phase: PhaseId,
 	completed: z.boolean(),
 	notes: z.string().nullable(),
+	/** Programmed today but skipped — machine taken, feeling off, whatever. */
+	skippedExerciseIds: z.array(z.string()).default([]),
+	/** Custom exercises pulled into this session. */
+	extraExerciseIds: z.array(z.string()).default([]),
 });
 export type SessionRecord = z.infer<typeof SessionRecord>;
 
@@ -240,3 +244,69 @@ export const AnkleCheck = z.object({
 	notes: z.string().nullable(),
 });
 export type AnkleCheck = z.infer<typeof AnkleCheck>;
+
+// ------------------------------------------------- personalisation & tracking
+
+/**
+ * Your changes to the program, keyed by canonical exercise id.
+ *
+ * The YAML in `content/` stays the baseline so re-importing the spreadsheet
+ * never wipes your edits; these are merged over it at read time. Every field is
+ * optional — an override only states what you changed.
+ */
+export const ExerciseOverride = z.object({
+	id: z.string(),
+	exerciseId: z.string(),
+	startKg: z.number().nullable().optional(),
+	/** The machine's real smallest jump, which the spreadsheet never stated. */
+	incrementKg: z.number().nullable().optional(),
+	repMin: z.number().nullable().optional(),
+	repMax: z.number().nullable().optional(),
+	setsOverride: z.number().nullable().optional(),
+	note: z.string().nullable().optional(),
+});
+export type ExerciseOverride = z.infer<typeof ExerciseOverride>;
+
+/** An exercise you added yourself, not present in the imported program. */
+export const CustomExercise = z.object({
+	id: z.string(),
+	name: z.string().min(1),
+	target: Target,
+	load: Load,
+	sets: z.number().int().positive(),
+	isAnkle: z.boolean(),
+	progression: z.string(),
+	goal: z.string(),
+});
+export type CustomExercise = z.infer<typeof CustomExercise>;
+
+/** Weekly measurements — the Progreso sheet, which the app never had. */
+export const ProgressCheck = z.object({
+	id: z.string(),
+	date: IsoDate,
+	weightKg: z.number().nullable(),
+	waistCm: z.number().nullable(),
+	hipCm: z.number().nullable(),
+	thighCm: z.number().nullable(),
+	strengthSessions: z.number().nullable(),
+	cardioMinutes: z.number().nullable(),
+	rehabSessions: z.number().nullable(),
+	sleepHours: z.number().nullable(),
+	energy: z.number().nullable(),
+	/** 0–1, how well nutrition went. */
+	nutritionAdherence: z.number().nullable(),
+	notes: z.string().nullable(),
+});
+export type ProgressCheck = z.infer<typeof ProgressCheck>;
+
+/** A reference that motivates you, or one of your own progress photos. */
+export const InspoItem = z.object({
+	id: z.string(),
+	kind: z.enum(["reference", "progress"]),
+	date: IsoDate,
+	/** Key of an image held in OPFS; null for a link-only reference. */
+	photoId: z.string().nullable(),
+	url: z.string().nullable(),
+	note: z.string().nullable(),
+});
+export type InspoItem = z.infer<typeof InspoItem>;

@@ -33,6 +33,8 @@ type ExerciseLoggerProps = {
 	previous: PreviousPerformance | null;
 	todaySets: readonly SetRecord[];
 	onSave: (set: NewSet) => void;
+	/** Opens the editor for a set already logged today. */
+	onEditSet: (set: SetRecord) => void;
 };
 
 const TONE_TEXT = {
@@ -51,6 +53,7 @@ export function ExerciseLogger({
 	previous,
 	todaySets,
 	onSave,
+	onEditSet,
 }: ExerciseLoggerProps) {
 	const working = todaySets.filter((set) => !set.isWarmup);
 	const copy = describeDecision(decision, exercise.progression);
@@ -203,26 +206,33 @@ export function ExerciseLogger({
 				<div className="mt-5">
 					<p className="eyebrow mb-2">Hoy</p>
 					<ul className="space-y-1">
+						{/* Tap a logged set to fix it. A wrong load is not just a wrong
+						    row — progression reads the last session and would carry the
+						    mistake into the next suggestion. */}
 						{todaySets.map((set) => (
-							<li
-								key={set.id}
-								className="tabular flex justify-between text-[0.8125rem]"
-							>
-								<span className="text-muted">
-									<span className="text-faint">{set.setNumber}</span>{" "}
-									{formatSet(set)}
-									{set.isWarmup ? (
-										<span className="ml-2 text-faint">aprox.</span>
-									) : null}
-								</span>
-								<span className="text-faint">
-									{set.rir !== null ? `RIR ${set.rir}` : ""}
-									{set.anklePain !== null && set.anklePain > 0 ? (
-										<span className="ml-2 text-stop">
-											dolor {set.anklePain}
-										</span>
-									) : null}
-								</span>
+							<li key={set.id}>
+								<button
+									type="button"
+									onClick={() => onEditSet(set)}
+									className="tabular flex w-full justify-between py-1 text-left text-[0.8125rem] active:opacity-60"
+								>
+									<span className="text-muted">
+										<span className="text-faint">{set.setNumber}</span>{" "}
+										{formatSet(set)}
+										{set.isWarmup ? (
+											<span className="ml-2 text-faint">aprox.</span>
+										) : null}
+									</span>
+									<span className="text-faint">
+										{set.rir !== null ? `RIR ${set.rir}` : ""}
+										{set.anklePain !== null && set.anklePain > 0 ? (
+											<span className="ml-2 text-stop">
+												dolor {set.anklePain}
+											</span>
+										) : null}
+										<span className="ml-2 text-faint">›</span>
+									</span>
+								</button>
 							</li>
 						))}
 					</ul>

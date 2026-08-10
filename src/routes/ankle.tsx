@@ -6,7 +6,8 @@
  * would have to hold in your head.
  */
 
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { TabBar } from "@/components/TabBar";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { Stepper } from "@/components/Stepper";
@@ -232,23 +233,7 @@ function Ankle() {
 				))}
 			</section>
 
-			<nav className="fixed inset-x-0 bottom-0 border-t border-line bg-ground/95 backdrop-blur">
-				<div className="mx-auto flex max-w-lg">
-					<Link to="/" className="eyebrow flex-1 py-4 text-center">
-						Hoy
-					</Link>
-					<Link
-						to="/ankle"
-						className="eyebrow flex-1 py-4 text-center"
-						activeProps={{ className: "text-reserve" }}
-					>
-						Tobillo
-					</Link>
-					<Link to="/history" className="eyebrow flex-1 py-4 text-center">
-						Historial
-					</Link>
-				</div>
-			</nav>
+			<TabBar />
 		</main>
 	);
 }

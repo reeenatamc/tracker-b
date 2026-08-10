@@ -16,7 +16,15 @@ import {
 	persistedCollectionOptions,
 } from "@tanstack/browser-db-sqlite-persistence";
 import { createCollection } from "@tanstack/react-db";
-import type { AnkleCheck, SessionRecord, SetRecord } from "@/domain/schema";
+import type {
+	AnkleCheck,
+	CustomExercise,
+	ExerciseOverride,
+	InspoItem,
+	ProgressCheck,
+	SessionRecord,
+	SetRecord,
+} from "@/domain/schema";
 
 const DATABASE_NAME = "operacion-tesis";
 
@@ -83,7 +91,55 @@ async function createCollections() {
 		}),
 	);
 
-	return { sessions, sets, ankleChecks };
+	// Your edits to the program. Kept separate from the imported content so
+	// re-importing the spreadsheet never overwrites them.
+	const overrides = createCollection(
+		persistedCollectionOptions<ExerciseOverride, string>({
+			id: "exercise_overrides",
+			getKey: (override) => override.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	const customExercises = createCollection(
+		persistedCollectionOptions<CustomExercise, string>({
+			id: "custom_exercises",
+			getKey: (exercise) => exercise.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	const progressChecks = createCollection(
+		persistedCollectionOptions<ProgressCheck, string>({
+			id: "progress_checks",
+			getKey: (check) => check.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	// Only metadata lives here; the images themselves are files in OPFS, so a
+	// live query never drags megabytes of photo into memory.
+	const inspo = createCollection(
+		persistedCollectionOptions<InspoItem, string>({
+			id: "inspo",
+			getKey: (item) => item.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	return {
+		sessions,
+		sets,
+		ankleChecks,
+		overrides,
+		customExercises,
+		progressChecks,
+		inspo,
+	};
 }
 
 type BrowserDatabase = Awaited<
