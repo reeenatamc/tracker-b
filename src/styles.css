@@ -1,55 +1,54 @@
 @import "tailwindcss";
 
 /*
- * Operación Tesis — an operations log, not a fitness app.
+ * Operación Tesis.
  *
- * The program is a 19-week campaign with phases, advance criteria and stop
- * signals; the interface reads like a field log rather than a dashboard. Flat
- * rules and hairlines carry structure; radius is reserved for things you can
- * actually touch, so tappable and non-tappable never look alike.
+ * White ground, content in raised cards. The earlier version set everything on a
+ * tinted field with hairline rules and a monospace voice, which read as a printed
+ * log sheet — precise, and wrong for something you hold in one hand.
  *
- * Light, on a pale blue ground — a log sheet. Colour encodes exactly one idea,
- * reps in reserve, which is the axis the whole program turns on: reserve,
- * effort, stop. Nothing else is coloured.
+ * Now: one sans face throughout, numbers in tabular figures so columns still line
+ * up, generous radius, and a single accent. Colour still carries exactly one idea
+ * — reps in reserve, the axis the whole program turns on: reserve, effort, stop.
+ * Nothing else is coloured.
  *
- * Every text pair clears 4.5:1 against the surface it sits on, because this
- * gets read at arm's length in bad gym lighting.
+ * Every text pair clears 4.5:1 against the surface it sits on, because this gets
+ * read at arm's length in bad gym lighting.
  */
 
 @theme {
-	--color-ground: #eef5fa;
+	--color-ground: #ffffff;
 	--color-surface: #ffffff;
-	--color-raised: #e2eef7;
-	--color-line: #c9dded;
-	--color-ink: #0d2331;
-	--color-muted: #3e5b6e;
-	--color-faint: #52697a;
+	/* Inputs and steppers, which need to read as recessed against a white card. */
+	--color-raised: #f1f5f9;
+	--color-line: #e4eaf0;
+	--color-ink: #0d1b26;
+	--color-muted: #46606f;
+	--color-faint: #64798a;
 
 	/* You have room to spare — the state the program is written around. */
 	--color-reserve: #0a6fa8;
-	--color-reserve-soft: #d9ecf8;
+	--color-reserve-soft: #e7f2fa;
 	/* At the edge: reps owned, but too close to failure to add load. */
 	--color-effort: #9a5c00;
-	--color-effort-soft: #fbeed6;
+	--color-effort-soft: #fdf3e2;
 	/* Stop signal: pain, swelling, instability. */
 	--color-stop: #be2a46;
-	--color-stop-soft: #fbe2e7;
+	--color-stop-soft: #fdeaee;
 
 	/* Text that sits on a filled accent. */
 	--color-on-accent: #ffffff;
 
-	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
-	--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-sans:
+		ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+	--shadow-card: 0 1px 2px rgb(13 27 38 / 0.04), 0 4px 16px rgb(13 27 38 / 0.05);
 }
 
 /*
- * Everything below is layered on purpose.
- *
- * Unlayered CSS outranks *every* cascade layer regardless of specificity, so a
- * bare `button { color: inherit }` silently beat `.text-on-accent` from
- * Tailwind's utilities layer — the primary button, the steppers and the active
- * nav link all quietly lost their colour. Base rules belong in `base`, and
- * anything a utility should be able to override belongs below `utilities`.
+ * Layered on purpose. Unlayered CSS outranks every cascade layer regardless of
+ * specificity, so a bare `button { color: inherit }` silently beat Tailwind's
+ * utilities and the primary button lost its colour.
  */
 @layer base {
 	* {
@@ -59,7 +58,6 @@
 	html {
 		background: var(--color-ground);
 		color-scheme: light;
-		/* iOS: keep the safe-area colour matching the page in standalone mode. */
 		-webkit-text-size-adjust: 100%;
 	}
 
@@ -68,8 +66,7 @@
 		min-height: 100dvh;
 		/*
 		 * Installed on iOS the app runs edge to edge, so the clock and the signal
-		 * icons sit on top of whatever is at the top of the page unless the safe
-		 * area is reserved here.
+		 * icons sit on top of the page unless the safe area is reserved here.
 		 */
 		padding-top: env(safe-area-inset-top);
 		background: var(--color-ground);
@@ -77,17 +74,19 @@
 		font-family: var(--font-sans);
 		/* Logging happens one-handed between sets; nothing should rubber-band. */
 		overscroll-behavior-y: none;
+		-webkit-font-smoothing: antialiased;
 	}
 
 	button,
 	input,
 	select,
-	a {
+	a,
+	textarea {
 		font: inherit;
 		color: inherit;
 	}
 
-	:where(button, a, input, [tabindex]):focus-visible {
+	:where(button, a, input, textarea, [tabindex]):focus-visible {
 		outline: 2px solid var(--color-reserve);
 		outline-offset: 2px;
 	}
@@ -95,21 +94,31 @@
 
 @layer components {
 	/*
-	 * Numbers are the content here — loads, reps, RIR, dates. A mono face keeps
-	 * digits aligned column to column, which is what makes a log scannable at a
-	 * glance instead of read word by word.
+	 * A raised panel. Sections used to be separated by full-width rules, which is
+	 * how a document is built, not an app — cards let the eye take one thing at a
+	 * time and give the screen an edge to breathe against.
 	 */
-	.tabular {
-		font-family: var(--font-mono);
-		font-variant-numeric: tabular-nums;
+	.card {
+		background: var(--color-surface);
+		border-radius: 1.25rem;
+		box-shadow: var(--shadow-card);
+		padding: 1.25rem;
 	}
 
-	/* Small uppercase labels: the log's structural voice. */
+	/*
+	 * Numbers are the content here — loads, reps, RIR, dates. Tabular figures keep
+	 * them aligned column to column without a typewriter face.
+	 */
+	.tabular {
+		font-variant-numeric: tabular-nums;
+		font-feature-settings: "tnum";
+	}
+
+	/* Small labels above a group. Quiet, not shouted. */
 	.eyebrow {
-		font-family: var(--font-mono);
-		font-size: 0.6875rem;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.005em;
 		color: var(--color-faint);
 	}
 }

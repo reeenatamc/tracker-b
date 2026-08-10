@@ -101,7 +101,7 @@ export function ExerciseLogger({
 	}
 
 	return (
-		<div className="border-t border-line bg-surface px-4 py-5">
+		<div className="pt-5">
 			{/* What to do, and why — the column the spreadsheet made you fill in. */}
 			<p className={`text-sm font-semibold ${TONE_TEXT[copy.tone]}`}>
 				{copy.headline}

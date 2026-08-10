@@ -51,7 +51,7 @@ function Inspo() {
 	}
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
+		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<PageHeader
 				eyebrow="Referencias y progreso"
 				title="Inspo"
@@ -181,7 +181,7 @@ function Section({
 	children: React.ReactNode;
 }) {
 	return (
-		<section className="border-t border-line px-4 py-6">
+		<section className="card">
 			<div className="mb-1 flex items-center justify-between">
 				<p className="eyebrow">{title}</p>
 				<button

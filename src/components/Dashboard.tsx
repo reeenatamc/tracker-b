@@ -46,7 +46,7 @@ export function Dashboard({
 
 	return (
 		<>
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<div className="flex items-baseline justify-between">
 					<p className="eyebrow">
 						Semana <span className="text-reserve">{progress.week}</span> de{" "}
@@ -93,7 +93,7 @@ export function Dashboard({
 				</dl>
 			</section>
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<p className="eyebrow mb-1">Objetivos del plan</p>
 				<p className="mb-4 text-[0.8125rem] text-faint">
 					Cómo va cada uno, con lo que has registrado.
@@ -133,7 +133,7 @@ export function Dashboard({
 			</section>
 
 			{program.keyRules.length > 0 ? (
-				<details className="border-t border-line px-4 py-6">
+				<details className="card">
 					<summary className="eyebrow cursor-pointer">Reglas clave</summary>
 					<ul className="mt-4 space-y-3">
 						{program.keyRules.map((rule) => (

@@ -21,7 +21,7 @@ export function ExerciseStrip({
 	onSelect: (exerciseId: string) => void;
 }) {
 	return (
-		<div className="px-4 pb-4">
+		<div className="pb-1">
 			<div className="flex gap-1">
 				{exercises.map((exercise, index) => {
 					const isDone = done.has(exercise.id);
@@ -73,7 +73,7 @@ export function ExerciseNav({
 	nextLabel: string | null;
 }) {
 	return (
-		<div className="flex items-center gap-3 border-t border-line px-4 py-4">
+		<div className="mt-5 flex items-center gap-3 border-t border-line pt-4">
 			<button
 				type="button"
 				onClick={onPrevious}

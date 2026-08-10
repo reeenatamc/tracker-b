@@ -52,7 +52,7 @@ function Progress() {
 	const latestScore = latest ? consistencyScore(latest) : null;
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
+		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<PageHeader
 				eyebrow="Revisión semanal"
 				title="Progreso"
@@ -71,7 +71,7 @@ function Progress() {
 			/>
 
 			{latestScore !== null ? (
-				<section className="border-t border-line px-4 py-6">
+				<section className="card">
 					<p className="eyebrow mb-2">Consistencia de la semana</p>
 					<p className="tabular text-4xl font-semibold text-ink">
 						{latestScore}
@@ -91,7 +91,7 @@ function Progress() {
 				</section>
 			) : null}
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<button
 					type="button"
 					onClick={() => setEditing("new")}
@@ -102,7 +102,7 @@ function Progress() {
 			</section>
 
 			{checks.length > 0 ? (
-				<section className="space-y-7 border-t border-line px-4 py-6">
+				<section className="card space-y-7">
 					<Trend
 						title="Peso"
 						points={series(checks, "weightKg")}
@@ -131,7 +131,7 @@ function Progress() {
 			) : null}
 
 			{checks.length >= 2 ? (
-				<section className="border-t border-line px-4 py-6">
+				<section className="card">
 					<p className="eyebrow mb-3">Desde el inicio</p>
 					<dl className="grid grid-cols-2 gap-4">
 						<Delta
@@ -167,7 +167,7 @@ function Progress() {
 			) : null}
 
 			{ordered.length > 0 ? (
-				<section className="border-t border-line px-4 py-6">
+				<section className="card">
 					<p className="eyebrow mb-3">Semanas registradas</p>
 					<ul className="space-y-1">
 						{ordered.map((check) => (

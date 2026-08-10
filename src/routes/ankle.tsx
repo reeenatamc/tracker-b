@@ -64,10 +64,10 @@ function Ankle() {
 			: null;
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
-			<header className="px-4 pt-8 pb-6">
+		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
+			<header className="px-2 pt-7 pb-1">
 				<p className="eyebrow">Chequeo semanal</p>
-				<h1 className="tabular mt-3 text-2xl font-semibold tracking-tight uppercase">
+				<h1 className="mt-1 text-[1.75rem] leading-tight font-bold tracking-tight">
 					Tobillo
 				</h1>
 				{latest ? (
@@ -80,7 +80,7 @@ function Ankle() {
 				)}
 			</header>
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<TickScale
 					label="Dolor esta semana"
 					value={pain}
@@ -93,7 +93,7 @@ function Ankle() {
 				/>
 			</section>
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<p className="eyebrow mb-3">Knee-to-wall · centímetros</p>
 				<div className="flex gap-3">
 					<Stepper
@@ -126,7 +126,7 @@ function Ankle() {
 				) : null}
 			</section>
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<p className="eyebrow mb-3">Fuerza y balance · lado lesionado</p>
 				<div className="flex gap-3">
 					<Stepper
@@ -156,7 +156,7 @@ function Ankle() {
 				</div>
 			</section>
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<p className="eyebrow mb-3">Señales de alarma</p>
 				<Flag
 					label="El tobillo se fue en algún momento"
@@ -197,7 +197,7 @@ function Ankle() {
 			</div>
 
 			{history.length > 0 ? (
-				<section className="border-t border-line px-4 py-6">
+				<section className="card">
 					<p className="eyebrow mb-3">Historial</p>
 					<ul className="space-y-2">
 						{history.slice(0, 8).map((check) => (
@@ -221,7 +221,7 @@ function Ankle() {
 				</section>
 			) : null}
 
-			<section className="border-t border-line px-4 py-6">
+			<section className="card">
 				<p className="eyebrow mb-2">Seguridad</p>
 				{ankleProtocol.safetyNotes.map((note) => (
 					<p

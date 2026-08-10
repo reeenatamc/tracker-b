@@ -46,7 +46,7 @@ export function BackupPanel() {
 	const busy = status.state === "busy";
 
 	return (
-		<section className="border-t border-line px-4 py-6">
+		<section className="card">
 			<p className="eyebrow mb-1">Respaldo</p>
 			<p className="mb-4 text-[0.8125rem] text-faint">
 				Todo vive solo en este dispositivo. Guarda una copia donde quieras — es

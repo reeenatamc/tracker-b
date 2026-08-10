@@ -69,7 +69,7 @@ function History() {
 		};
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
+		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<PageHeader
 				eyebrow="Registro completo"
 				title="Historial"
@@ -79,7 +79,7 @@ function History() {
 			/>
 
 			{ordered.length === 0 ? (
-				<div className="border-t border-line px-4 py-10">
+				<div className="card">
 					<p className="text-sm text-muted">
 						Todavía no hay sesiones registradas.
 					</p>
@@ -95,10 +95,7 @@ function History() {
 					const byExercise = groupByExercise(sessionSets);
 
 					return (
-						<section
-							key={session.id}
-							className="border-t border-line px-4 py-5"
-						>
+						<section key={session.id} className="card">
 							<div className="flex items-baseline justify-between">
 								<p className="eyebrow">{formatDate(session.date)}</p>
 								<p className="eyebrow">Fase {session.phase}</p>

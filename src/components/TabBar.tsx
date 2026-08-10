@@ -49,9 +49,9 @@ export function PageHeader({
 	subtitle?: string;
 }) {
 	return (
-		<header className="px-4 pt-8 pb-6">
+		<header className="px-2 pt-7 pb-1">
 			<p className="eyebrow">{eyebrow}</p>
-			<h1 className="tabular mt-3 text-2xl font-semibold tracking-tight uppercase">
+			<h1 className="mt-1 text-[1.75rem] leading-tight font-bold tracking-tight">
 				{title}
 			</h1>
 			{subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}

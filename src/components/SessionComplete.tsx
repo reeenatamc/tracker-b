@@ -49,7 +49,7 @@ export function SessionComplete({
 	).length;
 
 	return (
-		<section className="border-t border-line bg-reserve-soft px-4 py-7">
+		<section className="card bg-reserve-soft">
 			<div className="flex items-start gap-3">
 				<Medal />
 				<div className="min-w-0 flex-1">
