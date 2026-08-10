@@ -10,6 +10,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
+import { BackupPanel } from "@/components/BackupPanel";
 import { SetEditor } from "@/components/SetEditor";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { useCollections } from "@/db/provider";
@@ -151,6 +152,8 @@ function History() {
 					);
 				})
 			)}
+
+			<BackupPanel />
 
 			{editing ? (
 				<SetEditor
