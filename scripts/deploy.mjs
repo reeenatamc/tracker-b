@@ -20,7 +20,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,6 +61,29 @@ if (!projectId || !orgId) fail("`.vercel/project.json` está incompleto.");
 const env = { VERCEL_PROJECT_ID: projectId, VERCEL_ORG_ID: orgId };
 
 copyFileSync(resolve(ROOT, "deploy/vercel.json"), resolve(OUT_DIR, "vercel.json"));
+
+/*
+ * The sync endpoint ships alongside the static build. Vercel turns any `api/*`
+ * file in the uploaded directory into a serverless function, and installs the
+ * dependencies listed in a package.json next to it — so the function gets its
+ * driver without the app's whole dependency tree coming along.
+ */
+mkdirSync(resolve(OUT_DIR, "api"), { recursive: true });
+copyFileSync(resolve(ROOT, "api/sync.ts"), resolve(OUT_DIR, "api/sync.ts"));
+
+const { dependencies } = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+writeFileSync(
+	resolve(OUT_DIR, "package.json"),
+	`${JSON.stringify(
+		{
+			name: "operacion-tesis-api",
+			private: true,
+			dependencies: { postgres: dependencies.postgres },
+		},
+		null,
+		2,
+	)}\n`,
+);
 
 const deployed = vercel(["deploy", "--prod", "--yes", OUT_DIR], {
 	stdio: ["inherit", "pipe", "inherit"],

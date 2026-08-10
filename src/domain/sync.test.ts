@@ -1,0 +1,143 @@
+import { describe, expect, it } from "vitest";
+import { changedSince, highWaterMark, mergeRecords, visible } from "./sync";
+
+type Row = {
+	id: string;
+	updatedAt: number;
+	deletedAt: number | null;
+	value?: string;
+};
+
+const row = (id: string, updatedAt: number, extra: Partial<Row> = {}): Row => ({
+	id,
+	updatedAt,
+	deletedAt: null,
+	...extra,
+});
+
+describe("mergeRecords", () => {
+	it("keeps the newer copy of a record edited on both devices", () => {
+		const local = [row("a", 100, { value: "laptop" })];
+		const incoming = [row("a", 200, { value: "phone" })];
+
+		const { merged, toApply } = mergeRecords(local, incoming);
+		expect(merged).toEqual([row("a", 200, { value: "phone" })]);
+		expect(toApply).toHaveLength(1);
+	});
+
+	it("keeps the local copy when it is newer, and marks it to push", () => {
+		const local = [row("a", 300, { value: "laptop" })];
+		const incoming = [row("a", 200, { value: "phone" })];
+
+		const { merged, toApply, toPush } = mergeRecords(local, incoming);
+		expect(merged[0].value).toBe("laptop");
+		expect(toApply).toHaveLength(0);
+		expect(toPush).toHaveLength(1);
+	});
+
+	it("takes records that exist on only one side", () => {
+		const { merged, toApply, toPush } = mergeRecords(
+			[row("a", 100)],
+			[row("b", 100)],
+		);
+		expect(merged.map((r) => r.id).sort()).toEqual(["a", "b"]);
+		expect(toApply.map((r) => r.id)).toEqual(["b"]);
+		expect(toPush.map((r) => r.id)).toEqual(["a"]);
+	});
+
+	it("carries a deletion across, rather than resurrecting the row", () => {
+		// The phone deleted a set the laptop still has a live copy of.
+		const local = [row("a", 100, { value: "sigue viva" })];
+		const incoming = [row("a", 200, { deletedAt: 200 })];
+
+		const { merged, toApply } = mergeRecords(local, incoming);
+		expect(merged[0].deletedAt).toBe(200);
+		expect(toApply).toHaveLength(1);
+		expect(visible(merged)).toEqual([]);
+	});
+
+	it("does not undelete when the deletion is the newer write", () => {
+		const local = [row("a", 300, { deletedAt: 300 })];
+		const incoming = [row("a", 100, { value: "copia vieja" })];
+
+		const { merged } = mergeRecords(local, incoming);
+		expect(merged[0].deletedAt).toBe(300);
+	});
+
+	it("resurrects a row that was re-created after the delete", () => {
+		const local = [row("a", 100, { deletedAt: 100 })];
+		const incoming = [row("a", 400, { value: "vuelta a crear" })];
+
+		const { merged } = mergeRecords(local, incoming);
+		expect(merged[0].deletedAt).toBeNull();
+		expect(visible(merged)).toHaveLength(1);
+	});
+
+	it("gives ties to the incoming copy, which is the same write echoed back", () => {
+		const local = [row("a", 100, { value: "local" })];
+		const incoming = [row("a", 100, { value: "remoto" })];
+
+		const { merged, toApply } = mergeRecords(local, incoming);
+		expect(merged[0].value).toBe("remoto");
+		// Nothing actually changed, so nothing needs writing.
+		expect(toApply).toHaveLength(0);
+	});
+
+	it("is idempotent — syncing twice changes nothing the second time", () => {
+		const local = [row("a", 100), row("b", 200)];
+		const incoming = [row("b", 300), row("c", 400)];
+
+		const first = mergeRecords(local, incoming);
+		const second = mergeRecords(first.merged, incoming);
+
+		expect(sorted(second.merged)).toEqual(sorted(first.merged));
+		expect(second.toApply).toHaveLength(0);
+	});
+
+	it("handles both sides being empty", () => {
+		expect(mergeRecords([], [])).toEqual({
+			merged: [],
+			toApply: [],
+			toPush: [],
+		});
+	});
+});
+
+describe("changedSince", () => {
+	it("returns only what moved after the mark", () => {
+		const records = [row("a", 100), row("b", 200), row("c", 300)];
+		expect(changedSince(records, 150).map((r) => r.id)).toEqual(["b", "c"]);
+	});
+
+	it("returns everything from zero", () => {
+		expect(changedSince([row("a", 1)], 0)).toHaveLength(1);
+	});
+});
+
+describe("highWaterMark", () => {
+	it("is the newest timestamp present", () => {
+		expect(highWaterMark([row("a", 100), row("b", 900), row("c", 300)])).toBe(
+			900,
+		);
+	});
+
+	it("never goes backwards", () => {
+		expect(highWaterMark([row("a", 100)], 500)).toBe(500);
+	});
+
+	it("survives an empty sync", () => {
+		expect(highWaterMark([], 42)).toBe(42);
+	});
+});
+
+describe("visible", () => {
+	it("hides deleted records without dropping them from the data", () => {
+		const records = [row("a", 1), row("b", 2, { deletedAt: 2 })];
+		expect(visible(records).map((r) => r.id)).toEqual(["a"]);
+		expect(records).toHaveLength(2);
+	});
+});
+
+function sorted(rows: readonly Row[]): Row[] {
+	return [...rows].sort((a, b) => a.id.localeCompare(b.id));
+}

@@ -16,6 +16,7 @@ import {
 	persistedCollectionOptions,
 } from "@tanstack/browser-db-sqlite-persistence";
 import { createCollection } from "@tanstack/react-db";
+import { syncable } from "./synced";
 import type {
 	AnkleCheck,
 	CustomExercise,
@@ -131,7 +132,7 @@ async function createCollections() {
 		}),
 	);
 
-	return {
+	const raw = {
 		sessions,
 		sets,
 		ankleChecks,
@@ -139,6 +140,26 @@ async function createCollections() {
 		customExercises,
 		progressChecks,
 		inspo,
+	};
+
+	/**
+	 * What the app writes through: every write is stamped and every delete
+	 * becomes a tombstone, so nothing has to remember to do it by hand.
+	 *
+	 * `raw` is the same collections unwrapped, and exists for exactly one caller:
+	 * the sync client, which must write incoming records verbatim. Stamping them
+	 * would make every pull look like a fresh local edit and the two devices
+	 * would push each other's data back and forth without ever settling.
+	 */
+	return {
+		sessions: syncable(sessions),
+		sets: syncable(sets),
+		ankleChecks: syncable(ankleChecks),
+		overrides: syncable(overrides),
+		customExercises: syncable(customExercises),
+		progressChecks: syncable(progressChecks),
+		inspo: syncable(inspo),
+		raw,
 	};
 }
 

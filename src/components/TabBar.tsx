@@ -3,6 +3,7 @@
  */
 
 import { Link } from "@tanstack/react-router";
+import { SyncStatus } from "./SyncStatus";
 
 const TABS = [
 	{ to: "/", label: "Hoy" },
@@ -15,7 +16,10 @@ const TABS = [
 export function TabBar() {
 	return (
 		<nav className="fixed inset-x-0 bottom-0 border-t border-line bg-ground/95 backdrop-blur">
-			<div className="mx-auto flex max-w-lg">
+			<div className="mx-auto max-w-lg">
+				<SyncStatus />
+			</div>
+			<div className="mx-auto flex max-w-lg border-t border-line">
 				{TABS.map((tab) => (
 					<Link
 						key={tab.to}
