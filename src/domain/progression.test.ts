@@ -5,7 +5,11 @@ import {
 	makeSets,
 	PROGRAM,
 } from "./__fixtures__/program";
-import { DEFAULT_INCREMENT_KG, decideProgression } from "./progression";
+import {
+	DEFAULT_INCREMENT_KG,
+	decideProgression,
+	judgesRir,
+} from "./progression";
 import { targetSets } from "./phases";
 
 const PHASE_1_RIR = { min: 2, max: 3 };
@@ -415,5 +419,78 @@ describe("per-exercise increment override", () => {
 			toKg: 25,
 			incrementKg: 5,
 		});
+	});
+});
+
+/*
+ * v3 pulled ankle work into its own protocol, and that protocol prescribes no
+ * RIR — rehab is not taken near failure. Judging it on a number that is never
+ * recorded stalled it on "falta registrar el RIR" forever.
+ */
+describe("rehab work is judged without RIR", () => {
+	const kneeToWall = makeExercise({
+		id: "knee_to_wall",
+		name: "Knee-to-wall",
+		target: { kind: "repsPerSide", min: 8, max: 10 },
+		isAnkle: true,
+		rir: null,
+		load: {
+			startKg: null,
+			perSide: false,
+			relativeToBase: false,
+			bodyweight: true,
+			needsCalibration: false,
+			incrementKg: null,
+			raw: "Peso corporal",
+		},
+	});
+
+	const withoutRir = makeSets(
+		0,
+		[
+			[10, 0],
+			[10, 0],
+		],
+		{ unit: "bodyweight", load: null },
+	).map((set) => ({ ...set, rir: null }));
+
+	it("advances on reps alone when the range is owned", () => {
+		expect(
+			decideProgression({
+				exercise: kneeToWall,
+				lastSets: withoutRir,
+				targetRir: PHASE_1_RIR,
+				targetSets: { min: 2, max: 2 },
+			}),
+		).toEqual({ kind: "advanceDifficulty" });
+	});
+
+	it("still holds while the reps fall short", () => {
+		expect(
+			decideProgression({
+				exercise: kneeToWall,
+				lastSets: withoutRir.map((set) => ({ ...set, reps: 8 })),
+				targetRir: PHASE_1_RIR,
+				targetSets: { min: 2, max: 2 },
+			}),
+		).toMatchObject({ kind: "hold", reason: "repsBelowTop" });
+	});
+
+	it("still asks for RIR on strength work, where the sheet prescribes it", () => {
+		expect(
+			decideProgression({
+				exercise: makeExercise(),
+				lastSets: makeSets(20, [
+					[12, 2],
+					[12, 2],
+				]).map((set) => ({ ...set, rir: null })),
+				targetRir: PHASE_1_RIR,
+				targetSets: { min: 2, max: 2 },
+			}),
+		).toMatchObject({ kind: "hold", reason: "rirUnknown" });
+	});
+
+	it("keeps judging RIR on ankle work the sheet does prescribe it for", () => {
+		expect(judgesRir({ ...kneeToWall, rir: { min: 2, max: 3 } })).toBe(true);
 	});
 });

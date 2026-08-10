@@ -13,6 +13,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
+import { CardioBlock } from "@/components/CardioBlock";
 import { QuickFinisher } from "@/components/QuickFinisher";
 import { useRest } from "@/components/RestTimer";
 import { SessionClock } from "@/components/SessionClock";
@@ -44,12 +45,19 @@ import {
 	volumeChange,
 	weekStreak,
 } from "@/domain/achievements";
+import {
+	CARDIO_EXERCISE,
+	cardioFor,
+	rehabAsExercise,
+	rehabStageFor,
+} from "@/domain/cardio-day";
 import { phaseForDate } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
 import {
 	dayPlanForDate,
 	nextSessionWeekday,
 	sessionForDate,
+	weekdayOf,
 } from "@/domain/schedule";
 import type { CustomExercise, Exercise, SetRecord } from "@/domain/schema";
 import { program } from "@/lib/content";
@@ -79,8 +87,27 @@ function Today() {
 	);
 
 	const phase = phaseForDate(program, today);
-	const template = sessionForDate(program, today);
 	const dayPlan = dayPlanForDate(program, today);
+	const cardio = cardioFor(program, today);
+	const rehab = rehabStageFor(program, today);
+
+	/*
+	 * On a strength day this is the programmed session. On a cardio day it is the
+	 * rehab block the calendar has reached, shaped the same way — so the strip,
+	 * the logger, progression and the summary all work without knowing which kind
+	 * of day it is.
+	 */
+	const strengthTemplate = sessionForDate(program, today);
+	const template =
+		strengthTemplate ??
+		(rehab
+			? {
+					id: "cardio_ankle",
+					name: dayPlan?.block ?? "Cardio + tobillo",
+					weekday: weekdayOf(today),
+					exercises: rehab.exercises.map(rehabAsExercise),
+				}
+			: null);
 
 	// `undefined` means "nothing chosen yet", which falls back to the exercise you
 	// are actually on — open the app mid-session and it is already there.
@@ -150,6 +177,27 @@ function Today() {
 			draft.startedAt ??= firstSetAt ?? null;
 			draft.endedAt = Date.now();
 			draft.completed = true;
+		});
+	}
+
+	function saveCardio(minutes: number) {
+		collections.sets.insert({
+			id: crypto.randomUUID(),
+			sessionId: ensureSession(),
+			exerciseId: "cardio_machine",
+			setNumber:
+				sets.filter(
+					(set) =>
+						set.sessionId === session?.id &&
+						set.exerciseId === "cardio_machine",
+				).length + 1,
+			isWarmup: false,
+			load: null,
+			unit: "minutes",
+			reps: minutes,
+			rir: null,
+			anklePain: null,
+			note: null,
 		});
 	}
 
@@ -296,9 +344,19 @@ function Today() {
 		customExercises.find((exercise) => exercise.id === exerciseId)?.name ??
 		exerciseId;
 
+	/*
+	 * Cardio is not in the exercise list — it sits in its own block above — so on a
+	 * Tuesday the day is not done just because the rehab is. Saturday's cardio is
+	 * offered rather than prescribed, and does not hold the day open.
+	 */
+	const cardioPending =
+		cardio !== null &&
+		!cardio.optional &&
+		!(session ? done.has("cardio_machine") : false);
+
 	const isComplete =
 		session?.endedAt != null ||
-		(exercises.length > 0 && done.size === exercises.length);
+		(exercises.length > 0 && done.size === exercises.length && !cardioPending);
 
 	// What each exercise's next target became, given today. Computed against
 	// today's own sets so it reads what you just did, not the session before it.
@@ -331,7 +389,11 @@ function Today() {
 					{template?.name ?? dayPlan?.block ?? "Sin sesión"}
 				</h1>
 				<p className="mt-1 text-sm text-muted">
-					{template ? phase.goal : (dayPlan?.focus ?? "")}
+					{strengthTemplate
+						? phase.goal
+						: rehab
+							? `Tobillo · ${rehab.stage}`
+							: (dayPlan?.focus ?? "")}
 				</p>
 				<p className="mt-3 text-[0.6875rem] text-faint">
 					<span className="tabular">{progress.weeksToCheckpoint}</span> semanas
@@ -362,6 +424,32 @@ function Today() {
 							streak={weekStreak(sessions, sets, today)}
 							weekday={nextSessionWeekday(program, today)}
 							exerciseName={exerciseName}
+						/>
+					) : null}
+
+					{cardio ? (
+						<CardioBlock
+							day={cardio}
+							todaySets={
+								session ? setsFor(sets, session.id, "cardio_machine") : []
+							}
+							previous={(() => {
+								const last = previousPerformance(
+									sets,
+									sessions,
+									"cardio_machine",
+									session?.id ?? null,
+								);
+								const minutes = last?.sets.reduce(
+									(total, set) => total + (set.reps ?? 0),
+									0,
+								);
+								return last && minutes ? { date: last.date, minutes } : null;
+							})()}
+							onSave={saveCardio}
+							onEditSet={(set) =>
+								setEditingSet({ set, exercise: CARDIO_EXERCISE })
+							}
 						/>
 					) : null}
 

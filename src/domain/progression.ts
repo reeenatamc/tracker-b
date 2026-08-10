@@ -77,6 +77,17 @@ export type ProgressionInput = {
 	safety?: SafetyInput;
 };
 
+/**
+ * Whether "how close to failure was that?" is a question this exercise asks.
+ *
+ * The rehab protocol prescribes no RIR — ankle work is deliberately not taken
+ * near failure — so asking for it would clutter the logger and, worse, stall
+ * progression forever waiting on a number nobody is ever going to record.
+ */
+export function judgesRir(exercise: Exercise): boolean {
+	return !(exercise.isAnkle && exercise.rir === null);
+}
+
 export function decideProgression(
 	input: ProgressionInput,
 ): ProgressionDecision {
@@ -131,7 +142,7 @@ export function decideProgression(
 
 	// …and with reps still in reserve — "25 kg: 8 reps muy exigentes → todavía no".
 	const judged = working.filter((set) => set.rir !== null);
-	if (judged.length === 0) {
+	if (judged.length === 0 && judgesRir(exercise)) {
 		return { kind: "hold", loadKg: workingLoad, perSide, reason: "rirUnknown" };
 	}
 	const allRirOk = judged.every((set) => (set.rir ?? 0) >= targetRir.min);

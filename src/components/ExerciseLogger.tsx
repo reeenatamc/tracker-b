@@ -10,7 +10,11 @@ import { useState } from "react";
 import { TickScale } from "@/components/TickScale";
 import { Stepper } from "@/components/Stepper";
 import type { PreviousPerformance } from "@/domain/history";
-import { type ProgressionDecision, repRangeOf } from "@/domain/progression";
+import {
+	judgesRir,
+	type ProgressionDecision,
+	repRangeOf,
+} from "@/domain/progression";
 import type { Exercise, PhaseId, Range, SetRecord } from "@/domain/schema";
 import {
 	describeDecision,
@@ -77,7 +81,7 @@ export function ExerciseLogger({
 
 	// RIR only means something on sets taken to a rep target. Cardio and timed
 	// holds are steered by RPE and by control, which the written rule covers.
-	const usesRir = repRangeOf(exercise) !== null;
+	const usesRir = repRangeOf(exercise) !== null && judgesRir(exercise);
 
 	const nextSetNumber = todaySets.length + 1;
 
