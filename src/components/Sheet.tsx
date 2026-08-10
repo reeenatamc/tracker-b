@@ -3,9 +3,16 @@
  *
  * Editing happens where your thumb already is. A centred dialog on a phone puts
  * the controls at the top of the screen and the keyboard over them.
+ *
+ * Rendered into `document.body` rather than in place. `position: fixed` is only
+ * relative to the viewport while no ancestor creates a containing block, and the
+ * tab bar's `backdrop-blur` does exactly that — a sheet opened from there filled
+ * the bar instead of the screen, 85 pixels tall with its content scrolling
+ * inside. A portal makes that impossible to reintroduce from any caller.
  */
 
 import { type ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 type SheetProps = {
 	title: string;
@@ -37,7 +44,7 @@ export function Sheet({
 		};
 	}, [onClose]);
 
-	return (
+	return createPortal(
 		<div className="fixed inset-0 z-50 flex flex-col justify-end">
 			<button
 				type="button"
@@ -74,7 +81,8 @@ export function Sheet({
 				</div>
 				<div className="px-4 pt-4">{children}</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
 
