@@ -13,6 +13,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
+import { QuickFinisher } from "@/components/QuickFinisher";
+import { SessionComplete, type NextTarget } from "@/components/SessionComplete";
 import { ExerciseLogger, type NewSet } from "@/components/ExerciseLogger";
 import {
 	ExerciseSettings,
@@ -34,7 +36,11 @@ import {
 } from "@/domain/personalise";
 import { phaseForDate, weeksUntilCheckpoint } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
-import { dayPlanForDate, sessionForDate } from "@/domain/schedule";
+import {
+	dayPlanForDate,
+	nextSessionWeekday,
+	sessionForDate,
+} from "@/domain/schedule";
 import type { CustomExercise, Exercise, SetRecord } from "@/domain/schema";
 import { program } from "@/lib/content";
 import { formatDate, formatTarget, todayIso } from "@/lib/format";
@@ -76,6 +82,7 @@ function Today() {
 	} | null>(null);
 	const [settingsFor, setSettingsFor] = useState<Exercise | null>(null);
 	const [addingExercise, setAddingExercise] = useState(false);
+	const [addingFinisher, setAddingFinisher] = useState(false);
 	const [editingNotes, setEditingNotes] = useState(false);
 
 	const session =
@@ -155,6 +162,31 @@ function Today() {
 		});
 	}
 
+	function addFinisher(custom: CustomExercise, minutes: number) {
+		if (!collections.customExercises.has(custom.id)) {
+			collections.customExercises.insert(custom);
+		}
+		const id = ensureSession();
+		collections.sessions.update(id, (draft) => {
+			draft.extraExerciseIds = [
+				...new Set([...draft.extraExerciseIds, custom.id]),
+			];
+		});
+		collections.sets.insert({
+			id: crypto.randomUUID(),
+			sessionId: id,
+			exerciseId: custom.id,
+			setNumber: 1,
+			isWarmup: false,
+			load: null,
+			unit: "minutes",
+			reps: minutes,
+			rir: null,
+			anklePain: null,
+			note: null,
+		});
+	}
+
 	const exercises = template
 		? resolveSessionExercises({
 				template,
@@ -180,6 +212,29 @@ function Today() {
 			overrides.find((o) => o.exerciseId === exercise.id),
 		);
 
+	const isComplete = exercises.length > 0 && done.size === exercises.length;
+
+	// What each exercise's next target became, given today. Computed against
+	// today's own sets so it reads what you just did, not the session before it.
+	const nextTargets: NextTarget[] =
+		isComplete && session
+			? exercises.map((exercise) => ({
+					exercise,
+					decision: decideProgression({
+						exercise,
+						lastSets: setsFor(sets, session.id, exercise.id),
+						targetRir: phase.targetRir,
+						targetSets: setsOf(exercise),
+						safety: latestCheck
+							? {
+									swelling: latestCheck.swelling,
+									givesWay: latestCheck.givesWay,
+								}
+							: undefined,
+					}),
+				}))
+			: [];
+
 	return (
 		<main className="mx-auto min-h-dvh w-full max-w-lg pb-24">
 			<header className="px-4 pt-8 pb-6">
@@ -202,6 +257,19 @@ function Today() {
 
 			{template ? (
 				<>
+					{isComplete ? (
+						<SessionComplete
+							exerciseCount={exercises.length}
+							sets={
+								session
+									? sets.filter((set) => set.sessionId === session.id)
+									: []
+							}
+							nextTargets={nextTargets}
+							weekday={nextSessionWeekday(program, today)}
+						/>
+					) : null}
+
 					<Progress exercises={exercises} done={done} />
 					<ol>
 						{exercises.map((exercise, index) => (
@@ -260,13 +328,22 @@ function Today() {
 					</ol>
 
 					<section className="border-t border-line px-4 py-6">
-						<button
-							type="button"
-							onClick={() => setAddingExercise(true)}
-							className="h-12 w-full rounded-lg border border-line text-sm text-reserve"
-						>
-							Añadir ejercicio
-						</button>
+						<div className="flex gap-3">
+							<button
+								type="button"
+								onClick={() => setAddingFinisher(true)}
+								className="h-12 flex-1 rounded-lg border border-line text-sm text-reserve"
+							>
+								Añadir complemento
+							</button>
+							<button
+								type="button"
+								onClick={() => setAddingExercise(true)}
+								className="h-12 flex-1 rounded-lg border border-line text-sm text-muted"
+							>
+								Añadir ejercicio
+							</button>
+						</div>
 
 						{putBack.length > 0 ? (
 							<div className="mt-4">
@@ -354,6 +431,16 @@ function Today() {
 						setSettingsFor(null);
 					}}
 					onClose={() => setSettingsFor(null)}
+				/>
+			) : null}
+
+			{addingFinisher ? (
+				<QuickFinisher
+					onSave={(custom, minutes) => {
+						addFinisher(custom, minutes);
+						setAddingFinisher(false);
+					}}
+					onClose={() => setAddingFinisher(false)}
 				/>
 			) : null}
 

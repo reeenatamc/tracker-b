@@ -58,3 +58,28 @@ export function startOfWeek(date: string): string {
 	parsed.setUTCDate(parsed.getUTCDate() - dayOffset);
 	return parsed.toISOString().slice(0, 10);
 }
+
+const WEEKDAY_LABELS: Record<Weekday, string> = {
+	monday: "lunes",
+	tuesday: "martes",
+	wednesday: "miércoles",
+	thursday: "jueves",
+	friday: "viernes",
+	saturday: "sábado",
+	sunday: "domingo",
+};
+
+/**
+ * The next day that actually has a session, so the end of one points at the
+ * next. Looks a week ahead and gives up rather than looping forever.
+ */
+export function nextSessionWeekday(program: Program, from: string): string {
+	const start = new Date(`${from}T12:00:00Z`);
+	for (let offset = 1; offset <= 7; offset++) {
+		const next = new Date(start);
+		next.setUTCDate(next.getUTCDate() + offset);
+		const iso = next.toISOString().slice(0, 10);
+		if (sessionForDate(program, iso)) return WEEKDAY_LABELS[weekdayOf(iso)];
+	}
+	return "próximo día de entrenamiento";
+}

@@ -146,3 +146,29 @@ export function skippedExercises(
 		(exercise) => skipped.has(exercise.id) && setsFor(exercise, phase) !== null,
 	);
 }
+
+/**
+ * Finds an exercise anywhere it might be defined — the program's sessions, or
+ * the ones you added yourself — with your overrides applied.
+ *
+ * History needs this: a set logged three weeks ago still has to be editable, and
+ * the editor needs the exercise's rep range and increment to do anything useful.
+ */
+export function findExercise(
+	sessions: readonly SessionTemplate[],
+	customExercises: readonly CustomExercise[],
+	overrides: readonly ExerciseOverride[],
+	exerciseId: string,
+): Exercise | null {
+	const override = overrides.find((o) => o.exerciseId === exerciseId);
+
+	for (const session of sessions) {
+		const match = session.exercises.find(
+			(exercise) => exercise.id === exerciseId,
+		);
+		if (match) return applyOverride(match, override);
+	}
+
+	const custom = customExercises.find((exercise) => exercise.id === exerciseId);
+	return custom ? applyOverride(customToExercise(custom, 0), override) : null;
+}

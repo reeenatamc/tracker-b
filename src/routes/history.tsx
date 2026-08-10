@@ -1,12 +1,22 @@
 /**
- * Past sessions, newest first — the log read back.
+ * Past sessions, newest first — the log read back, and edited.
+ *
+ * Every set here is tappable. Mistakes get noticed later, not while you are
+ * still standing at the machine, and a wrong load is not just a wrong row:
+ * progression reads the last session, so it steers the next suggestion until it
+ * is fixed.
  */
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { TabBar } from "@/components/TabBar";
 import { useLiveQuery } from "@tanstack/react-db";
+import { useState } from "react";
+import { SetEditor } from "@/components/SetEditor";
+import { PageHeader, TabBar } from "@/components/TabBar";
 import { useCollections } from "@/db/provider";
+import { findExercise } from "@/domain/personalise";
+import { phaseById } from "@/domain/phases";
 import { sessionById } from "@/domain/schedule";
+import type { Exercise, PhaseId, SetRecord } from "@/domain/schema";
 import { program } from "@/lib/content";
 import { formatDate, formatRirSummary, formatSet } from "@/lib/format";
 
@@ -20,24 +30,52 @@ function History() {
 	const { data: sets = [] } = useLiveQuery((q) =>
 		q.from({ s: collections.sets }),
 	);
+	const { data: overrides = [] } = useLiveQuery((q) =>
+		q.from({ o: collections.overrides }),
+	);
+	const { data: customExercises = [] } = useLiveQuery((q) =>
+		q.from({ c: collections.customExercises }),
+	);
+
+	const [editing, setEditing] = useState<{
+		set: SetRecord;
+		exercise: Exercise;
+		phase: PhaseId;
+	} | null>(null);
 
 	const ordered = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
 
+	/** Falls back to a permissive placeholder so no set is ever uneditable. */
+	const exerciseFor = (exerciseId: string): Exercise =>
+		findExercise(program.sessions, customExercises, overrides, exerciseId) ?? {
+			id: exerciseId,
+			name: exerciseId,
+			order: 0,
+			setsByPhase: { 1: 1, 2: 1, 3: 1, 4: 1 },
+			target: { kind: "reps", min: 1, max: 99 },
+			load: {
+				startKg: null,
+				perSide: false,
+				relativeToBase: false,
+				bodyweight: false,
+				needsCalibration: false,
+				incrementKg: null,
+				raw: "",
+			},
+			progression: "",
+			goal: "",
+			isAnkle: false,
+		};
+
 	return (
 		<main className="mx-auto min-h-dvh w-full max-w-lg pb-24">
-			<header className="px-4 pt-8 pb-6">
-				<p className="eyebrow">Registro completo</p>
-				<h1 className="tabular mt-3 text-2xl font-semibold tracking-tight uppercase">
-					Historial
-				</h1>
-				<p className="mt-1 text-sm text-muted">
-					<span className="tabular">{sessions.length}</span> sesiones ·{" "}
-					<span className="tabular">
-						{sets.filter((set) => !set.isWarmup).length}
-					</span>{" "}
-					series de trabajo
-				</p>
-			</header>
+			<PageHeader
+				eyebrow="Registro completo"
+				title="Historial"
+				subtitle={`${sessions.length} sesiones · ${
+					sets.filter((set) => !set.isWarmup).length
+				} series de trabajo · toca una serie para corregirla`}
+			/>
 
 			{ordered.length === 0 ? (
 				<div className="border-t border-line px-4 py-10">
@@ -68,18 +106,38 @@ function History() {
 								{templateName(session.templateId)}
 							</h2>
 
-							<ul className="mt-3 space-y-2">
+							<ul className="mt-3 space-y-3">
 								{[...byExercise].map(([exerciseId, exerciseSets]) => (
 									<li key={exerciseId}>
 										<p className="text-[0.8125rem] text-muted">
-											{exerciseName(exerciseId)}
+											{exerciseFor(exerciseId).name}
 										</p>
-										<p className="tabular mt-0.5 text-[0.8125rem] text-faint">
-											{exerciseSets.map(formatSet).join("  ·  ")}
-											{formatRirSummary(exerciseSets)
-												? `   ${formatRirSummary(exerciseSets)}`
-												: ""}
-										</p>
+										<div className="mt-1 flex flex-wrap items-center gap-2">
+											{exerciseSets.map((set) => (
+												<button
+													key={set.id}
+													type="button"
+													onClick={() =>
+														setEditing({
+															set,
+															exercise: exerciseFor(exerciseId),
+															phase: session.phase,
+														})
+													}
+													className="tabular rounded-md border border-line bg-surface px-2 py-1 text-[0.8125rem] text-faint active:bg-raised"
+												>
+													{formatSet(set)}
+													{set.isWarmup ? (
+														<span className="ml-1">aprox.</span>
+													) : null}
+												</button>
+											))}
+											{formatRirSummary(exerciseSets) ? (
+												<span className="tabular text-[0.8125rem] text-faint">
+													{formatRirSummary(exerciseSets)}
+												</span>
+											) : null}
+										</div>
 									</li>
 								))}
 							</ul>
@@ -93,6 +151,25 @@ function History() {
 					);
 				})
 			)}
+
+			{editing ? (
+				<SetEditor
+					set={editing.set}
+					exercise={editing.exercise}
+					targetRir={phaseById(program, editing.phase).targetRir}
+					onSave={(changes) => {
+						collections.sets.update(editing.set.id, (draft) =>
+							Object.assign(draft, changes),
+						);
+						setEditing(null);
+					}}
+					onDelete={() => {
+						collections.sets.delete(editing.set.id);
+						setEditing(null);
+					}}
+					onClose={() => setEditing(null)}
+				/>
+			) : null}
 
 			<TabBar />
 		</main>
@@ -117,15 +194,4 @@ function templateName(templateId: string): string {
 	} catch {
 		return "Sesión";
 	}
-}
-
-/** Exercise names live in the program, keyed by the canonical id. */
-function exerciseName(exerciseId: string): string {
-	for (const session of program.sessions) {
-		const match = session.exercises.find(
-			(exercise) => exercise.id === exerciseId,
-		);
-		if (match) return match.name;
-	}
-	return exerciseId;
 }
