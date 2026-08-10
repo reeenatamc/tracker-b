@@ -10,7 +10,6 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
 import { CardioBlock } from "@/components/CardioBlock";
@@ -27,7 +26,7 @@ import {
 import { SetEditor } from "@/components/SetEditor";
 import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
 import { TabBar } from "@/components/TabBar";
-import { useCollections } from "@/db/provider";
+import { useRecords } from "@/db/records";
 import {
 	completedExerciseIds,
 	previousPerformance,
@@ -66,25 +65,16 @@ import { formatDate, formatTarget, todayIso } from "@/lib/format";
 export const Route = createFileRoute("/")({ component: Today });
 
 function Today() {
-	const collections = useCollections();
+	const {
+		collections,
+		sessions,
+		sets,
+		ankleChecks,
+		overrides,
+		customExercises,
+	} = useRecords();
 	const rest = useRest();
 	const today = todayIso();
-
-	const { data: sessions = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sessions }),
-	);
-	const { data: sets = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sets }),
-	);
-	const { data: ankleChecks = [] } = useLiveQuery((q) =>
-		q.from({ a: collections.ankleChecks }),
-	);
-	const { data: overrides = [] } = useLiveQuery((q) =>
-		q.from({ o: collections.overrides }),
-	);
-	const { data: customExercises = [] } = useLiveQuery((q) =>
-		q.from({ c: collections.customExercises }),
-	);
 
 	const phase = phaseForDate(program, today);
 	const dayPlan = dayPlanForDate(program, today);

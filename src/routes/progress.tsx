@@ -8,7 +8,6 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { PrimaryButton, NoteField, Sheet } from "@/components/Sheet";
 import { Stepper } from "@/components/Stepper";
@@ -16,7 +15,7 @@ import { Dashboard } from "@/components/Dashboard";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
 import { Trend } from "@/components/Trend";
-import { useCollections } from "@/db/provider";
+import { useRecords } from "@/db/records";
 import { summarise } from "@/domain/achievements";
 import {
 	consistencyScore,
@@ -32,19 +31,13 @@ import { formatDate, formatDayMonth, todayIso } from "@/lib/format";
 export const Route = createFileRoute("/progress")({ component: Progress });
 
 function Progress() {
-	const collections = useCollections();
-	const { data: checks = [] } = useLiveQuery((q) =>
-		q.from({ p: collections.progressChecks }),
-	);
-	const { data: sessions = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sessions }),
-	);
-	const { data: sets = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sets }),
-	);
-	const { data: ankleChecks = [] } = useLiveQuery((q) =>
-		q.from({ a: collections.ankleChecks }),
-	);
+	const {
+		collections,
+		progressChecks: checks,
+		sessions,
+		sets,
+		ankleChecks,
+	} = useRecords();
 	const [editing, setEditing] = useState<ProgressCheck | "new" | null>(null);
 
 	const ordered = [...checks].sort((a, b) => b.date.localeCompare(a.date));

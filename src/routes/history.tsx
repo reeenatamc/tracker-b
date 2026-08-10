@@ -8,12 +8,11 @@
  */
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { BackupPanel } from "@/components/BackupPanel";
 import { SetEditor } from "@/components/SetEditor";
 import { PageHeader, TabBar } from "@/components/TabBar";
-import { useCollections } from "@/db/provider";
+import { useRecords } from "@/db/records";
 import { displayName } from "@/domain/exercise-ids";
 import { findExercise } from "@/domain/personalise";
 import { phaseById } from "@/domain/phases";
@@ -25,19 +24,8 @@ import { formatDate, formatRirSummary, formatSet } from "@/lib/format";
 export const Route = createFileRoute("/history")({ component: History });
 
 function History() {
-	const collections = useCollections();
-	const { data: sessions = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sessions }),
-	);
-	const { data: sets = [] } = useLiveQuery((q) =>
-		q.from({ s: collections.sets }),
-	);
-	const { data: overrides = [] } = useLiveQuery((q) =>
-		q.from({ o: collections.overrides }),
-	);
-	const { data: customExercises = [] } = useLiveQuery((q) =>
-		q.from({ c: collections.customExercises }),
-	);
+	const { collections, sessions, sets, overrides, customExercises } =
+		useRecords();
 
 	const [editing, setEditing] = useState<{
 		set: SetRecord;

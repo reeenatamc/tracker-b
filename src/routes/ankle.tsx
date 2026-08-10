@@ -8,11 +8,10 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { TabBar } from "@/components/TabBar";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useState } from "react";
 import { Stepper } from "@/components/Stepper";
 import { TickScale } from "@/components/TickScale";
-import { useCollections } from "@/db/provider";
+import { useRecords } from "@/db/records";
 import { evaluateSafety } from "@/domain/safety";
 import { ankleProtocol } from "@/lib/content";
 import { formatDayMonth, SAFETY_LABELS, todayIso } from "@/lib/format";
@@ -20,11 +19,8 @@ import { formatDayMonth, SAFETY_LABELS, todayIso } from "@/lib/format";
 export const Route = createFileRoute("/ankle")({ component: Ankle });
 
 function Ankle() {
-	const collections = useCollections();
+	const { collections, ankleChecks: checks } = useRecords();
 	const today = todayIso();
-	const { data: checks = [] } = useLiveQuery((q) =>
-		q.from({ a: collections.ankleChecks }),
-	);
 
 	const history = [...checks].sort((a, b) => b.date.localeCompare(a.date));
 	const latest = history[0] ?? null;

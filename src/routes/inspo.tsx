@@ -10,12 +10,11 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useRef, useState } from "react";
 import { Photo } from "@/components/Photo";
 import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
 import { PageHeader, TabBar } from "@/components/TabBar";
-import { useCollections } from "@/db/provider";
+import { useRecords } from "@/db/records";
 import type { InspoItem } from "@/domain/schema";
 import { formatDayMonth, todayIso } from "@/lib/format";
 import { deletePhoto, formatBytes, photosSize, savePhoto } from "@/lib/photos";
@@ -25,10 +24,7 @@ export const Route = createFileRoute("/inspo")({ component: Inspo });
 type Kind = InspoItem["kind"];
 
 function Inspo() {
-	const collections = useCollections();
-	const { data: items = [] } = useLiveQuery((q) =>
-		q.from({ i: collections.inspo }),
-	);
+	const { collections, inspo: items } = useRecords();
 
 	const [adding, setAdding] = useState<Kind | null>(null);
 	const [editing, setEditing] = useState<InspoItem | null>(null);
