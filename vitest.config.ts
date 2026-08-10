@@ -7,7 +7,9 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    // `api/` is covered too: the reminder decides what day it is in someone
+    // else's time zone, which is exactly the kind of thing that is quietly wrong.
+    include: ['src/**/*.test.ts', 'api/**/*.test.ts'],
     environment: 'node',
   },
 })

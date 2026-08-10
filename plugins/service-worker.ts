@@ -88,6 +88,41 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+self.addEventListener('push', (event) => {
+  // A push with an unreadable body still has to raise something: iOS revokes the
+  // permission of a worker that receives one and shows nothing.
+  let payload = {}
+  try {
+    payload = event.data ? event.data.json() : {}
+  } catch (error) {
+    payload = {}
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title || 'Operación Tesis', {
+      body: payload.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: payload.tag || 'reminder',
+      data: { url: payload.url || '/' },
+    }),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const target = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      // Focus the app if it is already open rather than stacking another window.
+      const open = windows.find((client) => client.url.startsWith(self.location.origin))
+      if (open) return open.focus()
+      return self.clients.openWindow(target)
+    }),
+  )
+})
+
 self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return

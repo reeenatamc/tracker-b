@@ -4,12 +4,19 @@
  * Offline is not an error state here and is not styled like one — the whole app
  * is built to work without a connection, so "sin conexión" is a normal Tuesday
  * at the gym, not a problem to solve.
+ *
+ * Tapping it opens what this device does on its own: sync and the daily
+ * reminder. It used to sync on tap, which is the one thing the app already does
+ * by itself four different ways.
  */
 
+import { useState } from "react";
+import { DeviceSettings } from "./DeviceSettings";
 import { useSync } from "@/db/sync-provider";
 
 export function SyncStatus() {
-	const { state, syncNow } = useSync();
+	const { state } = useSync();
+	const [open, setOpen] = useState(false);
 
 	const label =
 		state.status === "unconfigured"
@@ -27,13 +34,16 @@ export function SyncStatus() {
 	const tone = state.status === "error" ? "text-stop" : "text-faint";
 
 	return (
-		<button
-			type="button"
-			onClick={syncNow}
-			className={`eyebrow w-full px-4 py-2 text-left ${tone}`}
-		>
-			{label}
-		</button>
+		<>
+			<button
+				type="button"
+				onClick={() => setOpen(true)}
+				className={`eyebrow w-full px-4 py-2 text-left ${tone}`}
+			>
+				{label}
+			</button>
+			{open ? <DeviceSettings onClose={() => setOpen(false)} /> : null}
+		</>
 	);
 }
 
