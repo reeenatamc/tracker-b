@@ -11,15 +11,18 @@ import { useEffect, useState } from "react";
 import { Sheet } from "./Sheet";
 import { useSync } from "@/db/sync-provider";
 import { disablePush, enablePush, type PushState, pushState } from "@/lib/push";
+import { type StorageState, storageState } from "@/lib/persist";
 import { program } from "@/lib/content";
 
 export function DeviceSettings({ onClose }: { onClose: () => void }) {
 	const { state, syncNow } = useSync();
 	const [push, setPush] = useState<PushState | null>(null);
+	const [storage, setStorage] = useState<StorageState | null>(null);
 	const [working, setWorking] = useState(false);
 
 	useEffect(() => {
 		void pushState().then(setPush);
+		void storageState().then(setStorage);
 	}, []);
 
 	async function toggleReminders() {
@@ -39,6 +42,13 @@ export function DeviceSettings({ onClose }: { onClose: () => void }) {
 		<Sheet title="Este dispositivo" onClose={onClose}>
 			<div className="space-y-6 px-4 py-5">
 				<section>
+					<h3 className="text-base font-semibold">Dónde vive tu registro</h3>
+					<p className="mt-1 text-[0.8125rem] leading-relaxed text-muted">
+						{storage ? STORAGE_COPY[storage] : "Comprobando…"}
+					</p>
+				</section>
+
+				<section className="border-t border-line pt-5">
 					<h3 className="text-base font-semibold">Sincronización</h3>
 					<p className="mt-1 text-[0.8125rem] leading-relaxed text-muted">
 						{SYNC_COPY[state.status]}
@@ -91,6 +101,15 @@ export function DeviceSettings({ onClose }: { onClose: () => void }) {
 
 /** The states where there is something the button can actually change. */
 const CAN_TOGGLE = new Set(["on", "off", "unconfigured"]);
+
+const STORAGE_COPY: Record<StorageState, string> = {
+	persisted:
+		"En este dispositivo, marcado como permanente: el navegador no lo borrará para hacer espacio. Aun así, es una sola copia — exporta de vez en cuando desde Historial.",
+	"best-effort":
+		"En este dispositivo, sin marca de permanente: el navegador podría borrarlo si le falta espacio. Exporta desde Historial para tener una copia fuera.",
+	unknown:
+		"En este dispositivo. Exporta desde Historial para tener una copia fuera de aquí.",
+};
 
 const SYNC_COPY: Record<string, string> = {
 	unconfigured:

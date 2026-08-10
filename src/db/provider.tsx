@@ -5,6 +5,7 @@
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
 import { registerServiceWorker } from "@/lib/register-service-worker";
+import { requestPersistence } from "@/lib/persist";
 import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
 import { syncSeed } from "@/lib/seed";
 import { type Collections, getCollections } from "./collections";
@@ -21,6 +22,9 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 
 	useEffect(() => {
 		registerServiceWorker();
+		// Everything is in one browser profile until sync is connected, so the one
+		// realistic way this log is lost is the browser reclaiming space.
+		void requestPersistence();
 
 		let cancelled = false;
 		getCollections().then(
