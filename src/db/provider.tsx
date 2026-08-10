@@ -49,10 +49,10 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 	if (status.state === "error") {
 		return (
 			<div className="mx-auto max-w-md p-6 text-center">
-				<p className="text-lg font-semibold text-rose-300">
+				<p className="text-lg font-semibold text-stop">
 					No se pudo abrir tu base de datos
 				</p>
-				<p className="mt-2 text-sm text-slate-400">{status.message}</p>
+				<p className="mt-2 text-sm text-muted">{status.message}</p>
 			</div>
 		);
 	}
@@ -60,7 +60,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 	if (status.state === "loading") {
 		return (
 			<div className="flex min-h-dvh items-center justify-center">
-				<p className="animate-pulse text-sm text-slate-500">
+				<p className="animate-pulse text-sm text-faint">
 					Abriendo tu registro…
 				</p>
 			</div>

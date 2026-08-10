@@ -106,6 +106,6 @@ export function TickScale({
 }
 
 const SELECTED: Record<Tone, string> = {
-	reserve: "border-reserve bg-reserve/15 text-reserve font-semibold",
-	stop: "border-stop bg-stop/15 text-stop font-semibold",
+	reserve: "border-reserve bg-reserve-soft text-reserve font-semibold",
+	stop: "border-stop bg-stop-soft text-stop font-semibold",
 };

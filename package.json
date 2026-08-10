@@ -18,7 +18,7 @@
     "check": "biome check",
     "import:excel": "tsx scripts/import-excel.ts",
     "icons": "tsx scripts/generate-icons.ts",
-    "deploy": "npm run build && cp deploy/vercel.json dist/client/vercel.json && vercel deploy --prod --yes dist/client"
+    "deploy": "npm run build && node scripts/deploy.mjs"
   },
   "dependencies": {
     "@journeyapps/wa-sqlite": "^1.7.2",

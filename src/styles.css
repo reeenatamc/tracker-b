@@ -8,89 +8,111 @@
  * rules and hairlines carry structure; radius is reserved for things you can
  * actually touch, so tappable and non-tappable never look alike.
  *
- * Colour encodes exactly one idea — reps in reserve, the axis the whole program
- * turns on: reserve, effort, stop. Nothing else is coloured.
+ * Light, on a pale blue ground — a log sheet. Colour encodes exactly one idea,
+ * reps in reserve, which is the axis the whole program turns on: reserve,
+ * effort, stop. Nothing else is coloured.
+ *
+ * Every text pair clears 4.5:1 against the surface it sits on, because this
+ * gets read at arm's length in bad gym lighting.
  */
 
 @theme {
-  --color-ground: #0e1116;
-  --color-surface: #151a21;
-  --color-raised: #1c222b;
-  --color-line: #262e3a;
-  --color-ink: #e6eaf0;
-  --color-muted: #8a94a3;
-  --color-faint: #5b6472;
+	--color-ground: #eef5fa;
+	--color-surface: #ffffff;
+	--color-raised: #e2eef7;
+	--color-line: #c9dded;
+	--color-ink: #0d2331;
+	--color-muted: #3e5b6e;
+	--color-faint: #52697a;
 
-  /* You have room to spare — the state the program is written around. */
-  --color-reserve: #3fd0b6;
-  /* At the edge: reps owned, but too close to failure to add load. */
-  --color-effort: #e8b04b;
-  /* Stop signal: pain, swelling, instability. */
-  --color-stop: #f2557a;
+	/* You have room to spare — the state the program is written around. */
+	--color-reserve: #0a6fa8;
+	--color-reserve-soft: #d9ecf8;
+	/* At the edge: reps owned, but too close to failure to add load. */
+	--color-effort: #9a5c00;
+	--color-effort-soft: #fbeed6;
+	/* Stop signal: pain, swelling, instability. */
+	--color-stop: #be2a46;
+	--color-stop-soft: #fbe2e7;
 
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-}
+	/* Text that sits on a filled accent. */
+	--color-on-accent: #ffffff;
 
-* {
-  box-sizing: border-box;
-}
-
-html {
-  background: var(--color-ground);
-  color-scheme: dark;
-  /* iOS: keep the safe-area colour matching the page in standalone mode. */
-  -webkit-text-size-adjust: 100%;
-}
-
-body {
-  margin: 0;
-  min-height: 100dvh;
-  background: var(--color-ground);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  /* Logging happens one-handed between sets; nothing should rubber-band. */
-  overscroll-behavior-y: none;
+	--font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+	--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 /*
- * Numbers are the content here — loads, reps, RIR, dates. Setting them in a
- * mono face keeps digits aligned column to column, which is what makes a log
- * scannable at a glance instead of read word by word.
+ * Everything below is layered on purpose.
+ *
+ * Unlayered CSS outranks *every* cascade layer regardless of specificity, so a
+ * bare `button { color: inherit }` silently beat `.text-on-accent` from
+ * Tailwind's utilities layer — the primary button, the steppers and the active
+ * nav link all quietly lost their colour. Base rules belong in `base`, and
+ * anything a utility should be able to override belongs below `utilities`.
  */
-.tabular {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+@layer base {
+	* {
+		box-sizing: border-box;
+	}
+
+	html {
+		background: var(--color-ground);
+		color-scheme: light;
+		/* iOS: keep the safe-area colour matching the page in standalone mode. */
+		-webkit-text-size-adjust: 100%;
+	}
+
+	body {
+		margin: 0;
+		min-height: 100dvh;
+		background: var(--color-ground);
+		color: var(--color-ink);
+		font-family: var(--font-sans);
+		/* Logging happens one-handed between sets; nothing should rubber-band. */
+		overscroll-behavior-y: none;
+	}
+
+	button,
+	input,
+	select,
+	a {
+		font: inherit;
+		color: inherit;
+	}
+
+	:where(button, a, input, [tabindex]):focus-visible {
+		outline: 2px solid var(--color-reserve);
+		outline-offset: 2px;
+	}
 }
 
-/* Small uppercase labels: the log's structural voice. */
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-faint);
-}
+@layer components {
+	/*
+	 * Numbers are the content here — loads, reps, RIR, dates. A mono face keeps
+	 * digits aligned column to column, which is what makes a log scannable at a
+	 * glance instead of read word by word.
+	 */
+	.tabular {
+		font-family: var(--font-mono);
+		font-variant-numeric: tabular-nums;
+	}
 
-/* Every interactive target clears the 44px minimum, with a visible focus ring. */
-button,
-input,
-select,
-a {
-  font: inherit;
-  color: inherit;
-}
-
-:where(button, a, input, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-reserve);
-  outline-offset: 2px;
+	/* Small uppercase labels: the log's structural voice. */
+	.eyebrow {
+		font-family: var(--font-mono);
+		font-size: 0.6875rem;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+		color: var(--color-faint);
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
 }

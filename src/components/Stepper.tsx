@@ -82,8 +82,7 @@ function StepButton({
 			aria-label={label}
 			onClick={onPress}
 			disabled={disabled}
-			className="h-14 w-14 shrink-0 rounded-lg border border-line bg-raised text-2xl text-ink
-                 transition-colors active:bg-line disabled:opacity-30"
+			className="h-14 w-14 shrink-0 rounded-lg border border-line bg-raised text-2xl text-ink transition-colors active:bg-line disabled:opacity-30"
 		>
 			{children}
 		</button>

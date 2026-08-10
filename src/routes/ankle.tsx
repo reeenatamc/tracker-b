@@ -189,8 +189,7 @@ function Ankle() {
 				<button
 					type="button"
 					onClick={save}
-					className="h-14 w-full rounded-lg bg-reserve text-base font-semibold text-ground
-                     transition-opacity active:opacity-80"
+					className="h-14 w-full rounded-lg bg-reserve text-base font-semibold text-on-accent transition-opacity active:opacity-80"
 				>
 					{saved ? "Guardado" : "Guardar chequeo"}
 				</button>

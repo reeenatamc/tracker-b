@@ -52,3 +52,7 @@ todos.json
 
 # Editor-local settings
 .vscode/
+.env*
+
+# Vercel link
+.env.local

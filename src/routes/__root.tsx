@@ -13,11 +13,11 @@ export const Route = createRootRoute({
 				content:
 					"width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1",
 			},
-			{ name: "theme-color", content: "#0e1116" },
+			{ name: "theme-color", content: "#eef5fa" },
 			{ name: "apple-mobile-web-app-capable", content: "yes" },
 			{
 				name: "apple-mobile-web-app-status-bar-style",
-				content: "black-translucent",
+				content: "default",
 			},
 			{ title: "Operación Tesis" },
 		],
