@@ -182,3 +182,156 @@ export function sessionVolume(
 }
 
 export { setsFor };
+
+export type PersonalRecord = {
+	exerciseId: string;
+	value: number;
+	previous: number;
+	unit: LoadGain["unit"];
+};
+
+/**
+ * What this session beat.
+ *
+ * The single most motivating thing a lifting app shows, and the reason Hevy and
+ * Strong both put it front and centre: a stat tells you what happened, a record
+ * tells you it has never happened before.
+ *
+ * Strictly greater than every earlier session, so matching a previous best is
+ * not a record — that would make "record" mean "showed up", and the word would
+ * stop meaning anything by week three.
+ */
+export function personalRecords(
+	sessions: readonly SessionRecord[],
+	sets: readonly SetRecord[],
+	sessionId: string,
+): PersonalRecord[] {
+	const dateOf = new Map(sessions.map((session) => [session.id, session.date]));
+	const today = dateOf.get(sessionId);
+	if (!today) return [];
+
+	const records: PersonalRecord[] = [];
+	const todaysExercises = new Set(
+		sets
+			.filter((set) => set.sessionId === sessionId && !set.isWarmup)
+			.map((s) => s.exerciseId),
+	);
+
+	for (const exerciseId of todaysExercises) {
+		const best = (predicate: (set: SetRecord) => boolean) =>
+			sets
+				.filter(
+					(set) =>
+						set.exerciseId === exerciseId && !set.isWarmup && predicate(set),
+				)
+				.map(measureOf)
+				.filter(
+					(m): m is { value: number; unit: LoadGain["unit"] } => m !== null,
+				);
+
+		const todayBest = best((set) => set.sessionId === sessionId);
+		// Earlier sessions only — a set from later today is not "previous".
+		const earlierBest = best((set) => {
+			const date = dateOf.get(set.sessionId);
+			return set.sessionId !== sessionId && date !== undefined && date < today;
+		});
+
+		if (todayBest.length === 0 || earlierBest.length === 0) continue;
+
+		const value = Math.max(...todayBest.map((m) => m.value));
+		const previous = Math.max(...earlierBest.map((m) => m.value));
+		if (value > previous) {
+			records.push({ exerciseId, value, previous, unit: todayBest[0].unit });
+		}
+	}
+
+	return records.sort((a, b) => b.value / b.previous - a.value / a.previous);
+}
+
+/**
+ * How long the session took, in minutes, from the first set logged to the last.
+ *
+ * Null for sessions logged before writes were timestamped, and for a session
+ * with a single set — one moment is not a duration.
+ */
+export function sessionMinutes(
+	sets: readonly SetRecord[],
+	sessionId: string,
+): number | null {
+	const stamps = sets
+		.filter((set) => set.sessionId === sessionId)
+		.map((set) => (set as { updatedAt?: number }).updatedAt)
+		.filter((stamp): stamp is number => typeof stamp === "number" && stamp > 0);
+
+	if (stamps.length < 2) return null;
+	const minutes = Math.round(
+		(Math.max(...stamps) - Math.min(...stamps)) / 60_000,
+	);
+	return minutes > 0 ? minutes : null;
+}
+
+/**
+ * Volume against the last time this same session was done, as a percentage.
+ * Null when there is nothing to compare against.
+ */
+export function volumeChange(
+	sessions: readonly SessionRecord[],
+	sets: readonly SetRecord[],
+	sessionId: string,
+): number | null {
+	const current = sessions.find((session) => session.id === sessionId);
+	if (!current) return null;
+
+	const previous = sessions
+		.filter(
+			(session) =>
+				session.templateId === current.templateId &&
+				session.date < current.date &&
+				sessionVolume(sets, session.id) > 0,
+		)
+		.sort((a, b) => b.date.localeCompare(a.date))[0];
+
+	if (!previous) return null;
+
+	const before = sessionVolume(sets, previous.id);
+	const now = sessionVolume(sets, sessionId);
+	if (before === 0 || now === 0) return null;
+
+	return Math.round(((now - before) / before) * 100);
+}
+
+/**
+ * Consecutive weeks, ending with this one, that met the strength target.
+ *
+ * Counted backwards from the current week and stopping at the first miss, which
+ * is what makes a streak worth protecting. The current week counts as soon as it
+ * hits the target — it is not held back for being unfinished.
+ */
+export function weekStreak(
+	sessions: readonly SessionRecord[],
+	sets: readonly SetRecord[],
+	today: string,
+): number {
+	const logged = sessions.filter((session) =>
+		sets.some((set) => set.sessionId === session.id && !set.isWarmup),
+	);
+
+	let streak = 0;
+	for (let back = 0; back < 60; back++) {
+		const weekStart = shiftWeeks(startOfWeek(today), -back);
+		const weekEnd = shiftWeeks(weekStart, 1);
+		const count = logged.filter(
+			(session) => session.date >= weekStart && session.date < weekEnd,
+		).length;
+
+		if (count >= WEEKLY_STRENGTH_TARGET) streak++;
+		else break;
+	}
+	return streak;
+}
+
+function shiftWeeks(date: string, weeks: number): string {
+	const shifted = new Date(`${date}T12:00:00Z`);
+	shifted.setUTCDate(shifted.getUTCDate() + weeks * 7);
+	return shifted.toISOString().slice(0, 10);
+}

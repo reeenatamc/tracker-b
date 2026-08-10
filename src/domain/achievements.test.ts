@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { PROGRAM } from "./__fixtures__/program";
 import {
 	loadGains,
+	personalRecords,
+	sessionMinutes,
+	volumeChange,
+	weekStreak,
 	sessionVolume,
 	summarise,
 	weekNumber,
@@ -233,5 +237,130 @@ describe("sessionVolume", () => {
 			}),
 		];
 		expect(sessionVolume(sets, "s1")).toBe(240);
+	});
+});
+
+describe("personalRecords", () => {
+	const sessions = [session("s1", "2026-08-10"), session("s2", "2026-08-17")];
+
+	it("reports beating a previous best", () => {
+		const sets = [
+			set("s1", "prensa", { load: 20 }),
+			set("s2", "prensa", { load: 25 }),
+		];
+		expect(personalRecords(sessions, sets, "s2")).toEqual([
+			{ exerciseId: "prensa", value: 25, previous: 20, unit: "kg" },
+		]);
+	});
+
+	it("does not call matching a previous best a record", () => {
+		// Otherwise "record" comes to mean "showed up", and stops meaning anything.
+		const sets = [
+			set("s1", "prensa", { load: 20 }),
+			set("s2", "prensa", { load: 20 }),
+		];
+		expect(personalRecords(sessions, sets, "s2")).toEqual([]);
+	});
+
+	it("has no record on the first time an exercise is ever logged", () => {
+		expect(
+			personalRecords(sessions, [set("s1", "prensa", { load: 20 })], "s1"),
+		).toEqual([]);
+	});
+
+	it("ignores approach sets on both sides of the comparison", () => {
+		const sets = [
+			set("s1", "prensa", { load: 40, isWarmup: true, setNumber: 1 }),
+			set("s1", "prensa", { load: 20, setNumber: 2 }),
+			set("s2", "prensa", { load: 25 }),
+		];
+		expect(personalRecords(sessions, sets, "s2")[0]).toMatchObject({
+			value: 25,
+			previous: 20,
+		});
+	});
+
+	it("compares only against earlier sessions, never later ones", () => {
+		const sets = [
+			set("s1", "prensa", { load: 20 }),
+			set("s2", "prensa", { load: 25 }),
+		];
+		// Judging the first session must not see the second.
+		expect(personalRecords(sessions, sets, "s1")).toEqual([]);
+	});
+
+	it("recognises a record in reps for bodyweight work", () => {
+		const sets = [
+			set("s1", "calf-raise", { load: null, unit: "bodyweight", reps: 12 }),
+			set("s2", "calf-raise", { load: null, unit: "bodyweight", reps: 15 }),
+		];
+		expect(personalRecords(sessions, sets, "s2")[0]).toMatchObject({
+			value: 15,
+			previous: 12,
+			unit: "reps",
+		});
+	});
+});
+
+describe("volumeChange", () => {
+	it("compares against the last time the same session was done", () => {
+		const sessions = [session("s1", "2026-08-10"), session("s2", "2026-08-17")];
+		const sets = [
+			set("s1", "prensa", { load: 20, reps: 10 }), // 200
+			set("s2", "prensa", { load: 20, reps: 12 }), // 240
+		];
+		expect(volumeChange(sessions, sets, "s2")).toBe(20);
+	});
+
+	it("has nothing to say about the first session of its kind", () => {
+		const sessions = [session("s1", "2026-08-10")];
+		expect(volumeChange(sessions, [set("s1", "prensa")], "s1")).toBeNull();
+	});
+});
+
+describe("weekStreak", () => {
+	const week = (dates: string[]) =>
+		dates.map((date, index) => session(`w${index}-${date}`, date));
+
+	it("counts consecutive weeks that met the target", () => {
+		const sessions = [
+			...week(["2026-08-10", "2026-08-12", "2026-08-14"]),
+			...week(["2026-08-03", "2026-08-05", "2026-08-07"]),
+		];
+		const sets = sessions.map((s) => set(s.id, "prensa"));
+		expect(weekStreak(sessions, sets, "2026-08-14")).toBe(2);
+	});
+
+	it("stops at the first week that fell short", () => {
+		const sessions = [
+			...week(["2026-08-10", "2026-08-12", "2026-08-14"]),
+			...week(["2026-08-03"]),
+			...week(["2026-07-27", "2026-07-29", "2026-07-31"]),
+		];
+		const sets = sessions.map((s) => set(s.id, "prensa"));
+		expect(weekStreak(sessions, sets, "2026-08-14")).toBe(1);
+	});
+
+	it("is zero when this week has not met the target yet", () => {
+		const sessions = week(["2026-08-10"]);
+		const sets = sessions.map((s) => set(s.id, "prensa"));
+		expect(weekStreak(sessions, sets, "2026-08-10")).toBe(0);
+	});
+});
+
+describe("sessionMinutes", () => {
+	it("measures first set to last", () => {
+		const sets = [
+			{ ...set("s1", "a", { setNumber: 1 }), updatedAt: 1_000_000 },
+			{
+				...set("s1", "b", { setNumber: 2 }),
+				updatedAt: 1_000_000 + 45 * 60_000,
+			},
+		] as SetRecord[];
+		expect(sessionMinutes(sets, "s1")).toBe(45);
+	});
+
+	it("is null for sessions logged before writes were timestamped", () => {
+		expect(sessionMinutes([set("s1", "a")], "s1")).toBeNull();
 	});
 });

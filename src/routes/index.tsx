@@ -36,7 +36,13 @@ import {
 	resolveSets,
 	skippedExercises,
 } from "@/domain/personalise";
-import { summarise } from "@/domain/achievements";
+import {
+	personalRecords,
+	sessionMinutes,
+	summarise,
+	volumeChange,
+	weekStreak,
+} from "@/domain/achievements";
 import { phaseForDate } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
 import {
@@ -300,6 +306,14 @@ function Today() {
 							}
 							nextTargets={nextTargets}
 							progress={progress}
+							records={
+								session ? personalRecords(sessions, sets, session.id) : []
+							}
+							minutes={session ? sessionMinutes(sets, session.id) : null}
+							volumeChange={
+								session ? volumeChange(sessions, sets, session.id) : null
+							}
+							streak={weekStreak(sessions, sets, today)}
 							weekday={nextSessionWeekday(program, today)}
 							exerciseName={exerciseName}
 						/>

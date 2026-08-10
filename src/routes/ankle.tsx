@@ -9,7 +9,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { TabBar } from "@/components/TabBar";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Stepper } from "@/components/Stepper";
 import { TickScale } from "@/components/TickScale";
 import { useCollections } from "@/db/provider";
@@ -28,22 +28,57 @@ function Ankle() {
 
 	const history = [...checks].sort((a, b) => b.date.localeCompare(a.date));
 	const latest = history[0] ?? null;
+	/*
+	 * The check being edited: today's if it exists, so reopening the tab shows
+	 * what you already entered instead of an empty form — and so saving twice in
+	 * a day corrects the record rather than creating a second one.
+	 */
+	const editing = history.find((check) => check.date === today) ?? null;
 
-	const [pain, setPain] = useState(0);
-	const [kneeToWallInjured, setKneeInjured] = useState<number | null>(null);
-	const [kneeToWallHealthy, setKneeHealthy] = useState<number | null>(null);
-	const [calfRaisesInjured, setCalfRaises] = useState<number | null>(null);
-	const [bestBalance, setBestBalance] = useState<number | null>(null);
-	const [avgBalance, setAvgBalance] = useState<number | null>(null);
-	const [givesWay, setGivesWay] = useState(false);
-	const [swelling, setSwelling] = useState(false);
+	const [pain, setPain] = useState(editing?.pain ?? 0);
+	const [kneeToWallInjured, setKneeInjured] = useState<number | null>(
+		editing?.kneeToWallInjured ?? null,
+	);
+	const [kneeToWallHealthy, setKneeHealthy] = useState<number | null>(
+		editing?.kneeToWallHealthy ?? null,
+	);
+	const [calfRaisesInjured, setCalfRaises] = useState<number | null>(
+		editing?.calfRaisesInjured ?? null,
+	);
+	const [bestBalance, setBestBalance] = useState<number | null>(
+		editing?.bestBalance ?? null,
+	);
+	const [avgBalance, setAvgBalance] = useState<number | null>(
+		editing?.avgBalance ?? null,
+	);
+	const [givesWay, setGivesWay] = useState(editing?.givesWay ?? false);
+	const [swelling, setSwelling] = useState(editing?.swelling ?? false);
 	const [saved, setSaved] = useState(false);
+
+	/*
+	 * The database opens asynchronously, so the first render has no check to seed
+	 * the fields from — `useState` initialisers run once and would leave the form
+	 * blank over a record that exists. This fills it in when the data arrives, and
+	 * again if the day's check is edited elsewhere.
+	 */
+	const [loadedId, setLoadedId] = useState<string | null>(null);
+	useEffect(() => {
+		if (!editing || editing.id === loadedId) return;
+		setLoadedId(editing.id);
+		setPain(editing.pain);
+		setKneeInjured(editing.kneeToWallInjured);
+		setKneeHealthy(editing.kneeToWallHealthy);
+		setCalfRaises(editing.calfRaisesInjured);
+		setBestBalance(editing.bestBalance);
+		setAvgBalance(editing.avgBalance);
+		setGivesWay(editing.givesWay);
+		setSwelling(editing.swelling);
+	}, [editing, loadedId]);
 
 	const verdict = evaluateSafety({ pain, swelling, givesWay });
 
 	function save() {
-		collections.ankleChecks.insert({
-			id: crypto.randomUUID(),
+		const record = {
 			date: today,
 			pain,
 			kneeToWallInjured,
@@ -53,8 +88,15 @@ function Ankle() {
 			avgBalance,
 			givesWay,
 			swelling,
-			notes: null,
-		});
+			notes: editing?.notes ?? null,
+		};
+		if (editing) {
+			collections.ankleChecks.update(editing.id, (draft) =>
+				Object.assign(draft, record),
+			);
+		} else {
+			collections.ankleChecks.insert({ id: crypto.randomUUID(), ...record });
+		}
 		setSaved(true);
 	}
 
@@ -74,6 +116,16 @@ function Ankle() {
 					<p className="mt-1 text-sm text-muted">
 						Último registro: {formatDayMonth(latest.date)} · dolor{" "}
 						<span className="tabular">{latest.pain}</span>
+						{latest.kneeToWallInjured !== null ? (
+							<>
+								{" · knee-to-wall "}
+								<span className="tabular">{latest.kneeToWallInjured}</span>
+								{latest.kneeToWallHealthy !== null ? (
+									<span className="tabular">/{latest.kneeToWallHealthy}</span>
+								) : null}
+								{" cm"}
+							</>
+						) : null}
 					</p>
 				) : (
 					<p className="mt-1 text-sm text-muted">Aún no hay registros.</p>
@@ -208,6 +260,13 @@ function Ankle() {
 								<span className="text-muted">{formatDayMonth(check.date)}</span>
 								<span className="text-faint">
 									dolor {check.pain}
+									{check.kneeToWallInjured !== null
+										? ` · ${check.kneeToWallInjured}${
+												check.kneeToWallHealthy !== null
+													? `/${check.kneeToWallHealthy}`
+													: ""
+											} cm`
+										: ""}
 									{check.bestBalance !== null
 										? ` · balance ${check.bestBalance}s`
 										: ""}
