@@ -64,7 +64,7 @@ function Ankle() {
 			: null;
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-24">
+		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<header className="px-4 pt-8 pb-6">
 				<p className="eyebrow">Chequeo semanal</p>
 				<h1 className="tabular mt-3 text-2xl font-semibold tracking-tight uppercase">

@@ -41,7 +41,7 @@ function Progress() {
 	const latestScore = latest ? consistencyScore(latest) : null;
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-24">
+		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<PageHeader
 				eyebrow="Revisión semanal"
 				title="Progreso"

@@ -1,6 +1,7 @@
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CollectionsProvider } from "@/db/provider";
+import { RestTimerProvider } from "@/components/RestTimer";
 import { SyncProvider } from "@/db/sync-provider";
 import appCss from "../styles.css?url";
 
@@ -40,7 +41,9 @@ function RootDocument({ children }: { children: ReactNode }) {
 			</head>
 			<body>
 				<CollectionsProvider>
-					<SyncProvider>{children}</SyncProvider>
+					<SyncProvider>
+						<RestTimerProvider>{children}</RestTimerProvider>
+					</SyncProvider>
 				</CollectionsProvider>
 				<Scripts />
 			</body>

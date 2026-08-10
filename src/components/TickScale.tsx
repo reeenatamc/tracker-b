@@ -49,7 +49,11 @@ export function TickScale({
 			 * choice out of a fixed set, so arrow-key navigation and screen-reader
 			 * announcements come for free instead of being reimplemented with ARIA.
 			 */}
-			<fieldset className="flex gap-1 border-0 p-0">
+			<fieldset
+				className={`grid gap-1.5 border-0 p-0 ${
+					ticks.length > 7 ? "grid-cols-6" : "grid-flow-col"
+				}`}
+			>
 				<legend className="sr-only">{label}</legend>
 				{ticks.map((tick) => {
 					const selected = value === tick;
@@ -60,7 +64,7 @@ export function TickScale({
 						<label
 							key={tick}
 							className={[
-								"tabular flex h-12 min-w-0 flex-1 cursor-pointer items-center justify-center",
+								"tabular flex h-14 min-w-0 cursor-pointer items-center justify-center",
 								"rounded-md border text-sm transition-colors",
 								"focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-reserve",
 								selected

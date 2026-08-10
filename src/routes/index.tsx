@@ -14,8 +14,10 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
 import { QuickFinisher } from "@/components/QuickFinisher";
+import { useRest } from "@/components/RestTimer";
 import { SessionComplete, type NextTarget } from "@/components/SessionComplete";
 import { ExerciseLogger, type NewSet } from "@/components/ExerciseLogger";
+import { ExerciseNav, ExerciseStrip } from "@/components/ExerciseStrip";
 import {
 	ExerciseSettings,
 	type OverrideChanges,
@@ -34,7 +36,8 @@ import {
 	resolveSets,
 	skippedExercises,
 } from "@/domain/personalise";
-import { phaseForDate, weeksUntilCheckpoint } from "@/domain/phases";
+import { summarise } from "@/domain/achievements";
+import { phaseForDate } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
 import {
 	dayPlanForDate,
@@ -49,6 +52,7 @@ export const Route = createFileRoute("/")({ component: Today });
 
 function Today() {
 	const collections = useCollections();
+	const rest = useRest();
 	const today = todayIso();
 
 	const { data: sessions = [] } = useLiveQuery((q) =>
@@ -73,7 +77,7 @@ function Today() {
 
 	// `undefined` means "nothing chosen yet", which falls back to the exercise you
 	// are actually on — open the app mid-session and it is already there.
-	const [openOverride, setOpenOverride] = useState<string | null | undefined>(
+	const [openOverride, setOpenOverride] = useState<string | undefined>(
 		undefined,
 	);
 	const [editingSet, setEditingSet] = useState<{
@@ -117,6 +121,8 @@ function Today() {
 			id: crypto.randomUUID(),
 			sessionId: ensureSession(),
 		});
+		// Approach sets do not earn a full rest, and timed work is its own timer.
+		if (!newSet.isWarmup && newSet.unit !== "minutes") rest.start();
 	}
 
 	function saveOverride(exerciseId: string, changes: OverrideChanges) {
@@ -204,6 +210,13 @@ function Today() {
 		exercises.find((exercise) => !done.has(exercise.id))?.id ?? null;
 	const openExerciseId =
 		openOverride === undefined ? firstPending : openOverride;
+	const current =
+		exercises.find((exercise) => exercise.id === openExerciseId) ??
+		exercises[0] ??
+		null;
+	const position = current
+		? exercises.findIndex((exercise) => exercise.id === current.id)
+		: 0;
 
 	const setsOf = (exercise: Exercise) =>
 		resolveSets(
@@ -211,6 +224,29 @@ function Today() {
 			phase.id,
 			overrides.find((o) => o.exerciseId === exercise.id),
 		);
+
+	const decisionFor = (exercise: Exercise) =>
+		decideProgression({
+			exercise,
+			lastSets:
+				previousPerformance(sets, sessions, exercise.id, session?.id ?? null)
+					?.sets ?? [],
+			targetRir: phase.targetRir,
+			targetSets: setsOf(exercise),
+			safety: latestCheck
+				? { swelling: latestCheck.swelling, givesWay: latestCheck.givesWay }
+				: undefined,
+		});
+
+	const progress = summarise(program, sessions, sets, today);
+
+	const exerciseName = (exerciseId: string) =>
+		exercises.find((exercise) => exercise.id === exerciseId)?.name ??
+		program.sessions
+			.flatMap((template) => template.exercises)
+			.find((exercise) => exercise.id === exerciseId)?.name ??
+		customExercises.find((exercise) => exercise.id === exerciseId)?.name ??
+		exerciseId;
 
 	const isComplete = exercises.length > 0 && done.size === exercises.length;
 
@@ -236,7 +272,7 @@ function Today() {
 			: [];
 
 	return (
-		<main className="mx-auto min-h-dvh w-full max-w-lg pb-24">
+		<main className="mx-auto min-h-dvh w-full max-w-lg pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<header className="px-4 pt-8 pb-6">
 				<p className="eyebrow">
 					{formatDate(today)} · Fase {phase.id} {phase.name}
@@ -248,10 +284,8 @@ function Today() {
 					{template ? phase.goal : (dayPlan?.focus ?? "")}
 				</p>
 				<p className="mt-3 text-[0.6875rem] text-faint">
-					<span className="tabular">
-						{weeksUntilCheckpoint(program, today)}
-					</span>{" "}
-					semanas hasta el checkpoint
+					<span className="tabular">{progress.weeksToCheckpoint}</span> semanas
+					hasta el checkpoint
 				</p>
 			</header>
 
@@ -259,73 +293,86 @@ function Today() {
 				<>
 					{isComplete ? (
 						<SessionComplete
-							exerciseCount={exercises.length}
 							sets={
 								session
 									? sets.filter((set) => set.sessionId === session.id)
 									: []
 							}
 							nextTargets={nextTargets}
+							progress={progress}
 							weekday={nextSessionWeekday(program, today)}
+							exerciseName={exerciseName}
 						/>
 					) : null}
 
-					<Progress exercises={exercises} done={done} />
-					<ol>
-						{exercises.map((exercise, index) => (
-							<ExerciseRow
-								key={exercise.id}
-								index={index + 1}
-								exercise={exercise}
-								setsLabel={setsOf(exercise)}
-								phaseId={phase.id}
-								isDone={done.has(exercise.id)}
-								isOpen={openExerciseId === exercise.id}
-								onToggle={() =>
+					<ExerciseStrip
+						exercises={exercises}
+						done={done}
+						currentId={current?.id ?? null}
+						onSelect={setOpenOverride}
+					/>
+
+					{current ? (
+						<>
+							<div className="flex items-start justify-between gap-3 border-t border-line px-4 pt-5">
+								<div className="min-w-0">
+									<p className="eyebrow">
+										{String(position + 1).padStart(2, "0")}
+										{current.isAnkle ? " · tobillo" : ""}
+									</p>
+									<h2 className="mt-1 text-2xl leading-tight font-semibold text-balance text-ink">
+										{current.name}
+									</h2>
+									<p className="tabular mt-1 text-[0.8125rem] text-muted">
+										{setsOf(current) ? `${setsOf(current)?.max} × ` : ""}
+										{formatTarget(current.target, phase.id)}
+									</p>
+								</div>
+								<button
+									type="button"
+									onClick={() => setSettingsFor(current)}
+									aria-label={`Ajustes de ${current.name}`}
+									className="-mr-2 shrink-0 px-3 py-2 text-lg text-faint"
+								>
+									⋯
+								</button>
+							</div>
+
+							<ExerciseLogger
+								exercise={current}
+								phase={phase.id}
+								targetSets={setsOf(current)}
+								targetRir={phase.targetRir}
+								decision={decisionFor(current)}
+								previous={previousPerformance(
+									sets,
+									sessions,
+									current.id,
+									session?.id ?? null,
+								)}
+								todaySets={session ? setsFor(sets, session.id, current.id) : []}
+								onSave={saveSet}
+								onEditSet={(set) => setEditingSet({ set, exercise: current })}
+							/>
+
+							<ExerciseNav
+								position={position}
+								total={exercises.length}
+								onPrevious={() =>
 									setOpenOverride(
-										openExerciseId === exercise.id ? null : exercise.id,
+										exercises[Math.max(0, position - 1)]?.id ?? null,
 									)
 								}
-								onSettings={() => setSettingsFor(exercise)}
-							>
-								<ExerciseLogger
-									exercise={exercise}
-									phase={phase.id}
-									targetSets={setsOf(exercise)}
-									targetRir={phase.targetRir}
-									decision={decideProgression({
-										exercise,
-										lastSets:
-											previousPerformance(
-												sets,
-												sessions,
-												exercise.id,
-												session?.id ?? null,
-											)?.sets ?? [],
-										targetRir: phase.targetRir,
-										targetSets: setsOf(exercise),
-										safety: latestCheck
-											? {
-													swelling: latestCheck.swelling,
-													givesWay: latestCheck.givesWay,
-												}
-											: undefined,
-									})}
-									previous={previousPerformance(
-										sets,
-										sessions,
-										exercise.id,
-										session?.id ?? null,
-									)}
-									todaySets={
-										session ? setsFor(sets, session.id, exercise.id) : []
-									}
-									onSave={saveSet}
-									onEditSet={(set) => setEditingSet({ set, exercise })}
-								/>
-							</ExerciseRow>
-						))}
-					</ol>
+								onNext={() =>
+									setOpenOverride(
+										exercises[Math.min(exercises.length - 1, position + 1)]
+											?.id ?? null,
+									)
+								}
+								nextLabel={exercises[position + 1]?.name ?? null}
+							/>
+						</>
+					) : null}
 
 					<section className="border-t border-line px-4 py-6">
 						<div className="flex gap-3">
@@ -470,96 +517,6 @@ function Today() {
 
 			<TabBar />
 		</main>
-	);
-}
-
-/** One block per exercise: the session's shape, and how much of it is behind you. */
-function Progress({
-	exercises,
-	done,
-}: {
-	exercises: readonly Exercise[];
-	done: ReadonlySet<string>;
-}) {
-	return (
-		<div className="px-4 pb-5">
-			<div className="flex gap-1" aria-hidden>
-				{exercises.map((exercise) => (
-					<span
-						key={exercise.id}
-						className={`h-1.5 flex-1 rounded-full transition-colors ${
-							done.has(exercise.id) ? "bg-reserve" : "bg-line"
-						}`}
-					/>
-				))}
-			</div>
-			<p className="eyebrow mt-2">
-				{done.size} de {exercises.length} ejercicios
-			</p>
-		</div>
-	);
-}
-
-function ExerciseRow({
-	index,
-	exercise,
-	setsLabel,
-	phaseId,
-	isDone,
-	isOpen,
-	onToggle,
-	onSettings,
-	children,
-}: {
-	index: number;
-	exercise: Exercise;
-	setsLabel: { min: number; max: number } | null;
-	phaseId: 1 | 2 | 3 | 4;
-	isDone: boolean;
-	isOpen: boolean;
-	onToggle: () => void;
-	onSettings: () => void;
-	children: React.ReactNode;
-}) {
-	return (
-		<li className="border-t border-line last:border-b">
-			<div className="flex items-stretch">
-				<button
-					type="button"
-					onClick={onToggle}
-					aria-expanded={isOpen}
-					className="flex flex-1 items-center gap-3 px-4 py-4 text-left active:bg-surface"
-				>
-					<span
-						className={`tabular w-6 shrink-0 text-xs ${isDone ? "text-reserve" : "text-faint"}`}
-						aria-hidden
-					>
-						{isDone ? "✓" : String(index).padStart(2, "0")}
-					</span>
-					<span className="min-w-0 flex-1">
-						<span className="block truncate text-[0.9375rem]">
-							{exercise.name}
-						</span>
-						{exercise.isAnkle ? (
-							<span className="eyebrow mt-0.5 block text-faint">tobillo</span>
-						) : null}
-					</span>
-					<span className="tabular shrink-0 text-xs text-muted">
-						{setsLabel ? `${setsLabel.max}×` : ""}
-						{formatTarget(exercise.target, phaseId)}
-					</span>
-				</button>
-				<button
-					type="button"
-					onClick={onSettings}
-					aria-label={`Ajustes de ${exercise.name}`}
-					className="px-4 text-lg text-faint active:bg-surface"
-				>
-					⋯
-				</button>
-			</div>
-			{isOpen ? children : null}
-		</li>
 	);
 }
 

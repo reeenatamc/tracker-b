@@ -161,7 +161,9 @@ export function createSyncClient(
 		} catch (error) {
 			const message =
 				error instanceof Error ? error.message : "No se pudo sincronizar.";
-			if (message.includes("DATABASE_URL")) {
+			// A 404 means there is no endpoint here at all — the dev server, or a
+			// build deployed before sync existed. Neither is a failure to report.
+			if (message.includes("DATABASE_URL") || message.includes("404")) {
 				onState({ status: "unconfigured" });
 			} else {
 				onState(
