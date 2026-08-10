@@ -37,6 +37,14 @@ const COLLECTIONS = new Set([
 let sql: ReturnType<typeof postgres> | null = null;
 let ready: Promise<void> | null = null;
 
+/*
+ * Vercel typechecks functions with its own tsc, which does not see this repo's
+ * @types/node, so the global would otherwise fail the build with "cannot find
+ * name 'process'". Declaring exactly what is read here is narrower than pulling
+ * the whole Node namespace in for one variable.
+ */
+declare const process: { env: Record<string, string | undefined> };
+
 function connect() {
 	const url = process.env.DATABASE_URL;
 	if (!url) throw new Error("DATABASE_URL no está configurada.");
