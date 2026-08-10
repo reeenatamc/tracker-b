@@ -1,0 +1,35 @@
+# Generic sample evidence base. See content.example/program.yaml for context.
+
+references:
+  - source: WHO
+    supports: >-
+      Referencia general de actividad física: 150–300 min moderados por semana y fuerza al menos 2
+      días.
+    reference: WHO Guidelines on Physical Activity and Sedentary Behaviour
+    url: https://www.who.int/europe/news-room/fact-sheets/item/physical-activity
+  - source: Morton et al., 2018
+    supports: >-
+      En entrenamiento de fuerza, los beneficios de la proteína tienden a saturarse alrededor de
+      1.6 g/kg/día.
+    reference: PMID 28698222
+    url: https://pubmed.ncbi.nlm.nih.gov/28698222/
+  - source: Martin et al., 2021
+    supports: Guía clínica para esguince lateral e inestabilidad crónica de tobillo.
+    reference: PMID 33789434
+    url: https://pubmed.ncbi.nlm.nih.gov/33789434/
+
+notes:
+  - >-
+    El objetivo del tracker es ayudarte a crear hábitos medibles y ajustar el plan, no obligarte a
+    perseguir un número específico de la báscula.
+  - >-
+    Si aparece dolor, hinchazón o episodios repetidos de inestabilidad, la prioridad es una
+    evaluación profesional presencial.
+
+programCriteria:
+  - >-
+    Cada bloque de la rutina debe cumplir dos condiciones: estar respaldado por evidencia o guías
+    serias y servir a un objetivo concreto del plan.
+  - >-
+    Full-body 3×/sem se usa por adherencia y frecuencia de estímulo, no porque sea superior a un
+    split cuando el volumen es igual.

@@ -1,0 +1,60 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { devtools } from "@tanstack/devtools-vite";
+import tailwindcss from "@tailwindcss/vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import { defineConfig, type Plugin } from "vite";
+import { parse } from "yaml";
+import { serviceWorker } from "./plugins/service-worker.ts";
+
+const resolvePath = (path: string) =>
+	fileURLToPath(new URL(path, import.meta.url));
+
+/**
+ * The training program lives in `content/`, which is gitignored: it is personal
+ * planning, not source. A fresh clone falls back to the generic sample so the
+ * app still builds and runs for anyone.
+ */
+const contentDir = existsSync(resolvePath("./content"))
+	? "./content"
+	: "./content.example";
+
+/**
+ * Turns `.yaml` imports into plain object modules at build time. Content is
+ * static, so parsing belongs in the build — this keeps the YAML parser out of
+ * the browser bundle entirely.
+ */
+function yamlContent(): Plugin {
+	return {
+		name: "yaml-content",
+		transform(code, id) {
+			if (!/\.ya?ml$/.test(id)) return null;
+			return {
+				code: `export default ${JSON.stringify(parse(code))}`,
+				map: null,
+			};
+		},
+	};
+}
+
+export default defineConfig({
+	resolve: {
+		tsconfigPaths: true,
+		alias: { "@content": resolvePath(contentDir) },
+	},
+	plugins: [
+		yamlContent(),
+		devtools(),
+		tailwindcss(),
+		// SPA mode, not SSR. This app renders from a local database that only
+		// exists in the browser, so a server has nothing to render — and a
+		// prerendered shell is what lets the service worker cache the whole app
+		// and open it with no network at all.
+		tanstackStart({
+			spa: { enabled: true },
+		}),
+		viteReact(),
+		serviceWorker(resolvePath("./public")),
+	],
+});

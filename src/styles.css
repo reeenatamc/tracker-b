@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+/*
+ * Operación Tesis — an operations log, not a fitness app.
+ *
+ * The program is a 19-week campaign with phases, advance criteria and stop
+ * signals; the interface reads like a field log rather than a dashboard. Flat
+ * rules and hairlines carry structure; radius is reserved for things you can
+ * actually touch, so tappable and non-tappable never look alike.
+ *
+ * Colour encodes exactly one idea — reps in reserve, the axis the whole program
+ * turns on: reserve, effort, stop. Nothing else is coloured.
+ */
+
+@theme {
+  --color-ground: #0e1116;
+  --color-surface: #151a21;
+  --color-raised: #1c222b;
+  --color-line: #262e3a;
+  --color-ink: #e6eaf0;
+  --color-muted: #8a94a3;
+  --color-faint: #5b6472;
+
+  /* You have room to spare — the state the program is written around. */
+  --color-reserve: #3fd0b6;
+  /* At the edge: reps owned, but too close to failure to add load. */
+  --color-effort: #e8b04b;
+  /* Stop signal: pain, swelling, instability. */
+  --color-stop: #f2557a;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-ground);
+  color-scheme: dark;
+  /* iOS: keep the safe-area colour matching the page in standalone mode. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Logging happens one-handed between sets; nothing should rubber-band. */
+  overscroll-behavior-y: none;
+}
+
+/*
+ * Numbers are the content here — loads, reps, RIR, dates. Setting them in a
+ * mono face keeps digits aligned column to column, which is what makes a log
+ * scannable at a glance instead of read word by word.
+ */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Small uppercase labels: the log's structural voice. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* Every interactive target clears the 44px minimum, with a visible focus ring. */
+button,
+input,
+select,
+a {
+  font: inherit;
+  color: inherit;
+}
+
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-reserve);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

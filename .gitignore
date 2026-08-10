@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────
+# PRIVATE — personal health data and training plan.
+# Never commit. Public counterpart lives in content.example/
+# ─────────────────────────────────────────────────────────────
+/content/
+/data/
+/photos/
+*.xlsx
+*.xls
+*.csv
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+.output
+.nitro
+.tanstack
+.vinxi
+.wrangler
+__unconfig*
+
+# Cache
+.vite
+*.tsbuildinfo
+
+# Test coverage
+coverage
+
+# Local SQLite (dev only)
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Misc
+*.local
+todos.json
+.DS_Store
+.idea
+*.swp
+
+# Vercel
+.vercel
+
+# Editor-local settings
+.vscode/
