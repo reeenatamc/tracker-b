@@ -177,6 +177,15 @@ function findRow(grid: Grid, heading: string): number {
   throw new Error(`Section not found in spreadsheet: "${heading}"`)
 }
 
+/** Row number whose cell in `column` equals `heading`. */
+function findRowIn(grid: Grid, heading: string, column: number): number {
+  const target = normalize(heading)
+  for (const [rowNumber, cols] of grid) {
+    if (normalize(cols.get(column) ?? '') === target) return rowNumber
+  }
+  throw new Error(`Section not found in column ${column}: "${heading}"`)
+}
+
 /** Rows of a table starting just below `headerRow`, stopping at the first gap. */
 function tableRows(grid: Grid, headerRow: number, columns: number): string[][] {
   const rows: string[][] = []
@@ -499,6 +508,22 @@ function buildProgram(dashboard: Grid, routine: Grid) {
     return { ...session, exercises }
   })
 
+  // The Dashboard sheet states what the program is for and the rules it runs by.
+  // Both belong with the program rather than being reinvented in the interface.
+  const objectives = tableRows(dashboard, findRowIn(dashboard, 'Objetivo', 4), 8)
+    .filter((row) => row[3] !== '')
+    .map((row) => ({
+      objective: row[3],
+      target: row[4],
+      measuredBy: row[5],
+      frequency: row[6],
+      priority: row[7],
+    }))
+
+  const keyRules = tableRows(dashboard, findRowIn(dashboard, 'REGLAS CLAVE', 10), 12)
+    .filter((row) => row[10] !== '' && row[11] !== '')
+    .map((row) => ({ rule: row[10], detail: row[11] }))
+
   const progressionRules = tableRows(routine, findRow(routine, 'Regla'), 2).map((row) => ({
     rule: row[0],
     detail: row[1],
@@ -515,6 +540,8 @@ function buildProgram(dashboard: Grid, routine: Grid) {
     phases,
     weekStructure,
     sessions,
+    objectives,
+    keyRules,
     progressionRules,
   }
 }

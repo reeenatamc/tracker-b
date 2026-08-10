@@ -310,6 +310,31 @@ sessions:
         goal: Tobillo
         isAnkle: true
 
+objectives:
+  - objective: Composición corporal
+    target: Más definida, sin perseguir gran pérdida de peso
+    measuredBy: Peso promedio + cintura + fotos
+    frequency: Semanal / mensual
+    priority: Alta
+  - objective: Fuerza
+    target: Progresar sin entrenar al fallo
+    measuredBy: Reps + carga + RIR
+    frequency: Cada sesión
+    priority: Alta
+  - objective: Adherencia
+    target: Que el plan sea sostenible
+    measuredBy: Sesiones + nutrición + sueño
+    frequency: Semanal
+    priority: Muy alta
+
+keyRules:
+  - rule: RIR
+    detail: Deja unas 2 repeticiones en reserva en las series de trabajo.
+  - rule: Progresión
+    detail: Sube la carga solo al dominar el tope de reps con buena técnica.
+  - rule: Revisión
+    detail: Cada sábado revisa los datos y ajusta, no improvises volumen.
+
 progressionRules:
   - rule: Doble progresión
     detail: >-

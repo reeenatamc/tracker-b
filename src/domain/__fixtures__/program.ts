@@ -222,6 +222,16 @@ export const PROGRAM: Program = {
 			],
 		},
 	],
+	objectives: [
+		{
+			objective: "Fuerza",
+			target: "Progresar sin entrenar al fallo",
+			measuredBy: "Reps + carga + RIR",
+			frequency: "Cada sesión",
+			priority: "Alta",
+		},
+	],
+	keyRules: [{ rule: "RIR", detail: "Deja ~2 reps en reserva." }],
 	progressionRules: [
 		{
 			rule: "Doble progresión",

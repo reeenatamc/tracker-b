@@ -140,6 +140,22 @@ export const Program = z.object({
 	phases: z.array(Phase).min(1),
 	weekStructure: z.array(WeekDayPlan),
 	sessions: z.array(SessionTemplate).min(1),
+	/** What the program is for, straight from the Dashboard sheet. */
+	objectives: z
+		.array(
+			z.object({
+				objective: z.string(),
+				target: z.string(),
+				measuredBy: z.string(),
+				frequency: z.string(),
+				priority: z.string(),
+			}),
+		)
+		.default([]),
+	/** The rules the program runs by — RIR, volume, ankle, review. */
+	keyRules: z
+		.array(z.object({ rule: z.string(), detail: z.string() }))
+		.default([]),
 	progressionRules: z.array(z.object({ rule: z.string(), detail: z.string() })),
 });
 export type Program = z.infer<typeof Program>;

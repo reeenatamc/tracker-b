@@ -12,10 +12,12 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useState } from "react";
 import { PrimaryButton, NoteField, Sheet } from "@/components/Sheet";
 import { Stepper } from "@/components/Stepper";
+import { Dashboard } from "@/components/Dashboard";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
 import { Trend } from "@/components/Trend";
 import { useCollections } from "@/db/provider";
+import { summarise } from "@/domain/achievements";
 import {
 	consistencyScore,
 	deltaFromBaseline,
@@ -34,6 +36,15 @@ function Progress() {
 	const { data: checks = [] } = useLiveQuery((q) =>
 		q.from({ p: collections.progressChecks }),
 	);
+	const { data: sessions = [] } = useLiveQuery((q) =>
+		q.from({ s: collections.sessions }),
+	);
+	const { data: sets = [] } = useLiveQuery((q) =>
+		q.from({ s: collections.sets }),
+	);
+	const { data: ankleChecks = [] } = useLiveQuery((q) =>
+		q.from({ a: collections.ankleChecks }),
+	);
 	const [editing, setEditing] = useState<ProgressCheck | "new" | null>(null);
 
 	const ordered = [...checks].sort((a, b) => b.date.localeCompare(a.date));
@@ -50,6 +61,13 @@ function Progress() {
 						? `Último registro: ${formatDate(latest.date)}`
 						: "Los sábados: registra la semana y ajusta."
 				}
+			/>
+
+			<Dashboard
+				program={program}
+				progress={summarise(program, sessions, sets, todayIso())}
+				checks={checks}
+				ankleChecks={ankleChecks}
 			/>
 
 			{latestScore !== null ? (
