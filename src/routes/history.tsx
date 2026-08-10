@@ -14,6 +14,7 @@ import { BackupPanel } from "@/components/BackupPanel";
 import { SetEditor } from "@/components/SetEditor";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { useCollections } from "@/db/provider";
+import { displayName } from "@/domain/exercise-ids";
 import { findExercise } from "@/domain/personalise";
 import { phaseById } from "@/domain/phases";
 import { sessionById } from "@/domain/schedule";
@@ -50,7 +51,7 @@ function History() {
 	const exerciseFor = (exerciseId: string): Exercise =>
 		findExercise(program.sessions, customExercises, overrides, exerciseId) ?? {
 			id: exerciseId,
-			name: exerciseId,
+			name: displayName(exerciseId),
 			order: 0,
 			setsByPhase: { 1: 1, 2: 1, 3: 1, 4: 1 },
 			target: { kind: "reps", min: 1, max: 99 },
@@ -65,6 +66,11 @@ function History() {
 			},
 			progression: "",
 			goal: "",
+			muscle: "",
+			rir: null,
+			restSeconds: null,
+			substitution: "",
+			technique: "",
 			isAnkle: false,
 		};
 

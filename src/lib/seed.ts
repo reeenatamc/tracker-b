@@ -94,6 +94,8 @@ export function syncSeed(collections: Collections): void {
 			phase: seed.data.phase,
 			completed: seed.data.completed,
 			notes: "Sesión base importada del Excel.",
+			startedAt: null,
+			endedAt: null,
 			skippedExerciseIds: [],
 			extraExerciseIds: [],
 		});

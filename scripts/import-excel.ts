@@ -2,7 +2,7 @@
  * One-shot importer: turns the original spreadsheet into the structured content
  * the app reads at runtime.
  *
- *   operacion_tesis_tracker_v2.xlsx
+ *   operacion_tesis_tracker_v3_auditado.xlsx
  *     -> content/program.yaml         training program (phases, sessions, exercises)
  *     -> content/ankle-protocol.yaml  ankle baseline + 6-week rehab protocol
  *     -> content/sources.yaml         evidence base
@@ -20,9 +20,10 @@ import { fileURLToPath } from 'node:url'
 import { XMLParser } from 'fast-xml-parser'
 import { unzipSync } from 'fflate'
 import { stringify } from 'yaml'
+import { resolveExerciseId } from '../src/domain/exercise-ids.ts'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const WORKBOOK = resolve(ROOT, 'operacion_tesis_tracker_v2.xlsx')
+const WORKBOOK = resolve(ROOT, 'operacion_tesis_tracker_v3_auditado.xlsx')
 const OUT_DIR = resolve(ROOT, 'content')
 
 // -------------------------------------------------------------- xlsx reading
@@ -205,7 +206,350 @@ function normalize(value: string): string {
     .toLowerCase()
 }
 
+// ------------------------------------------------------------------- sections
+
+/**
+ * Finds a numbered section by the words in its title rather than its position.
+ * v3 renumbered and reordered everything relative to v2; matching on "FULL BODY
+ * A" survives that, and survives the next reshuffle too.
+ */
+function findSection(grid: Grid, pattern: RegExp): number {
+  for (const [rowNumber, cols] of grid) {
+    const title = cols.get(1) ?? ''
+    if (pattern.test(normalize(title))) return rowNumber
+  }
+  throw new Error(`Section not found: ${pattern}`)
+}
+
+/** Column index of a header, by its label, within the header row of a section. */
+function columnsOf(grid: Grid, headerRow: number): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const [col, value] of grid.get(headerRow) ?? []) {
+    map.set(normalize(value), col)
+  }
+  return map
+}
+
+/**
+ * Reads a section's table as objects keyed by header label, so a column moving
+ * left or right between versions changes nothing here.
+ */
+function readTable(grid: Grid, titleRow: number): Array<Map<string, string>> {
+  const headerRow = titleRow + 1
+  const columns = columnsOf(grid, headerRow)
+  const rows: Array<Map<string, string>> = []
+
+  for (let row = headerRow + 1; ; row++) {
+    const first = at(grid, row, 1)
+    if (first === '') break
+    const record = new Map<string, string>()
+    for (const [label, col] of columns) record.set(label, at(grid, row, col))
+    rows.push(record)
+  }
+  return rows
+}
+
+const get = (row: Map<string, string>, ...labels: string[]): string => {
+  for (const label of labels) {
+    const value = row.get(normalize(label))
+    if (value !== undefined && value !== '') return value
+  }
+  return ''
+}
+
 // ------------------------------------------------------------------- parsing
+
+const DASHES = /[–—-]/
+const EMPTY = new Set(['', '—', '-', '–', 'n/a'])
+const isEmpty = (raw: string) => EMPTY.has(raw.trim().toLowerCase())
+
+function numbersIn(text: string): number[] {
+  return (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => Number(n.replace(',', '.')))
+}
+
+type Range = { min: number; max: number } | null
+
+/** "2", "2–3", "2; 3 solo en prioridad" -> a range. "—" -> null. */
+function parseRange(raw: string): Range {
+  if (isEmpty(raw)) return null
+  const numbers = numbersIn(raw)
+  if (numbers.length === 0) return null
+  return { min: numbers[0], max: numbers[1] ?? numbers[0] }
+}
+
+/** "90–120 s" -> {min:90,max:120}. v3 states rest per exercise; v2 never did. */
+function parseRest(raw: string): Range {
+  if (isEmpty(raw) || !/s|seg|min/i.test(raw)) return null
+  const numbers = numbersIn(raw)
+  if (numbers.length === 0) return null
+  const scale = /min/i.test(raw) ? 60 : 1
+  return { min: numbers[0] * scale, max: (numbers[1] ?? numbers[0]) * scale }
+}
+
+/** The RIR column carries RPE for warm-ups, which is a different scale. */
+function parseRir(raw: string): Range {
+  if (/rpe/i.test(raw)) return null
+  return parseRange(raw)
+}
+
+type Target =
+  | { kind: 'reps' | 'repsPerSide'; min: number; max: number }
+  | { kind: 'seconds' | 'secondsPerSide'; seconds: number }
+  | { kind: 'minutes'; min: number; max: number }
+  | { kind: 'rounds'; text: string }
+  | { kind: 'freeform'; text: string }
+
+function parseTarget(raw: string): Target {
+  const text = raw.trim()
+  const perSide = /\/\s*lado/i.test(text)
+
+  if (/min/i.test(text)) {
+    const [min, max] = numbersIn(text)
+    return { kind: 'minutes', min, max: max ?? min }
+  }
+  if (/ronda/i.test(text)) return { kind: 'rounds', text }
+  if (/\bs\b|segundo/i.test(text)) {
+    const [seconds] = numbersIn(text)
+    if (seconds !== undefined) return { kind: perSide ? 'secondsPerSide' : 'seconds', seconds }
+  }
+  const numbers = numbersIn(text)
+  if (numbers.length > 0) {
+    const [min, max] = numbers
+    return { kind: perSide ? 'repsPerSide' : 'reps', min, max: max ?? min }
+  }
+  return { kind: 'freeform', text }
+}
+
+type Load = {
+  startKg: number | null
+  perSide: boolean
+  relativeToBase: boolean
+  bodyweight: boolean
+  needsCalibration: boolean
+  incrementKg: number | null
+  raw: string
+}
+
+function parseLoad(raw: string): Load {
+  const text = raw.trim()
+  const [value] = numbersIn(text)
+  const statesKg = value !== undefined && /kg/i.test(text)
+  return {
+    startKg: statesKg ? value : null,
+    perSide: /\/\s*lado/i.test(text),
+    // "+5 kg/lado" is 5 kg per side on top of the sled, not an increment.
+    relativeToBase: text.startsWith('+'),
+    bodyweight: /corporal/i.test(text),
+    needsCalibration: /calibra/i.test(text),
+    // v3 states rest but still never states the smallest jump a machine allows.
+    incrementKg: null,
+    raw: isEmpty(text) ? '' : text,
+  }
+}
+
+const MONTHS: Record<string, number> = {
+  ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6,
+  jul: 7, ago: 8, sep: 9, oct: 10, nov: 11, dic: 12,
+}
+
+function monthIn(text: string): number | undefined {
+  const match = text.match(/[a-záéíóú]{3}/i)
+  return match ? MONTHS[normalize(match[0])] : undefined
+}
+
+function parseDateRange(raw: string, year: number): { start: string; end: string | null } {
+  const [rawStart, rawEnd] = raw.split(DASHES).map((part) => part.trim())
+  const trailing = monthIn(rawEnd ?? '') ?? monthIn(rawStart) ?? 1
+  const build = (text: string, month: number) => {
+    const [day] = numbersIn(text)
+    return `${year}-${String(month).padStart(2, '0')}-${String(day ?? 1).padStart(2, '0')}`
+  }
+  return {
+    start: build(rawStart, monthIn(rawStart) ?? trailing),
+    end: rawEnd && !/defensa/i.test(rawEnd) ? build(rawEnd, monthIn(rawEnd) ?? trailing) : null,
+  }
+}
+
+const WEEKDAY_BY_NAME: Record<string, string> = {
+  lunes: 'monday', martes: 'tuesday', miercoles: 'wednesday', jueves: 'thursday',
+  viernes: 'friday', sabado: 'saturday', domingo: 'sunday',
+}
+
+/**
+ * Exercises the ankle carries load through, which prompt for a pain score and
+ * are gated by the safety rules. Everything in the rehab section qualifies; in
+ * the strength sessions only the leg press does, because it is the one movement
+ * that drives through the ankle under load.
+ */
+const ANKLE_IN_STRENGTH = new Set(['leg_press'])
+
+/** Names the spreadsheet used that no canonical id claims. Reported, never guessed. */
+const unmapped: Array<{ section: string; name: string }> = []
+
+function idFor(section: string, name: string): string | null {
+  const id = resolveExerciseId(name)
+  if (!id) unmapped.push({ section, name })
+  return id
+}
+
+// -------------------------------------------------------------------- program
+
+const SESSION_SECTIONS = [
+  { pattern: /full body a/, id: 'full_body_a', name: 'Full Body A', weekday: 'monday' },
+  { pattern: /full body b/, id: 'full_body_b', name: 'Full Body B', weekday: 'wednesday' },
+  { pattern: /full body c/, id: 'full_body_c', name: 'Full Body C', weekday: 'friday' },
+] as const
+
+function buildProgram(dashboard: Grid, routine: Grid) {
+  const startDate = asDate(at(dashboard, 4, 2))
+  const checkpointDate = asDate(at(dashboard, 5, 2))
+  const year = Number(startDate.slice(0, 4))
+
+  const phases = readTable(routine, findSection(routine, /fases/))
+    .filter((row) => /^\d/.test(get(row, 'Fase')))
+    .map((row, index) => {
+      const { start, end } = parseDateRange(get(row, 'Fechas'), year)
+      return {
+        id: index + 1,
+        name: get(row, 'Fase').replace(/^\d+\s*·\s*/, '').trim(),
+        startDate: start,
+        endDate: end,
+        goal: get(row, 'Objetivo'),
+        workingSets: rangeToSets(parseRange(get(row, 'Series de trabajo'))),
+        targetRir: parseRir(get(row, 'RIR objetivo')) ?? { min: 2, max: 2 },
+        weeklyCardioMinutes: parseRange(get(row, 'Cardio semanal')) ?? { min: 0, max: 0 },
+        coreWeeklySets: get(row, 'Abdomen'),
+        ankleStage: get(row, 'Tobillo'),
+        progresses: get(row, 'Qué progresa'),
+        avoid: get(row, 'Qué NO hacemos'),
+      }
+    })
+
+  const weekStructure = readTable(routine, findSection(routine, /estructura semanal/))
+    .filter((row) => WEEKDAY_BY_NAME[normalize(get(row, 'Día'))])
+    .map((row) => ({
+      weekday: WEEKDAY_BY_NAME[normalize(get(row, 'Día'))],
+      block: get(row, 'Sesión'),
+      focus: get(row, 'Prioridad'),
+      hasStrength: /^s[ií]$/i.test(get(row, 'Fuerza')),
+      cardio: isEmpty(get(row, 'Cardio')) ? null : get(row, 'Cardio'),
+      hasCore: /^s[ií]$/i.test(get(row, 'Core')),
+      hasAnkle: /^s[ií]$/i.test(get(row, 'Rehab tobillo')),
+      duration: get(row, 'Duración aprox.', 'Duración'),
+      notes: '',
+    }))
+
+  const sessions = SESSION_SECTIONS.map((section) => {
+    const rows = readTable(routine, findSection(routine, section.pattern))
+    const exercises = rows
+      .filter((row) => /^\d+$/.test(get(row, 'Orden')))
+      .map((row) => {
+        const name = get(row, 'Ejercicio')
+        const id = idFor(section.name, name)
+        if (!id) return null
+
+        // v3 states sets twice: phase 1, then a single figure for phases 2–4.
+        const f1 = parseRange(get(row, 'Series F1'))
+        const later = parseRange(get(row, 'Series F2–4', 'Series F2-4')) ?? f1
+
+        return {
+          id,
+          name,
+          order: Number(get(row, 'Orden')),
+          muscle: get(row, 'Músculo/patrón'),
+          setsByPhase: { 1: rangeToSets(f1), 2: rangeToSets(later), 3: rangeToSets(later), 4: rangeToSets(later) },
+          target: parseTarget(get(row, 'Reps')),
+          load: parseLoad(get(row, 'Carga inicial')),
+          rir: parseRir(get(row, 'RIR')),
+          restSeconds: parseRest(get(row, 'Descanso')),
+          substitution: get(row, 'Sustitución válida', 'Sustitución'),
+          technique: get(row, 'Nota técnica'),
+          goal: get(row, 'Por qué está'),
+          progression: 'Doble progresión',
+          isAnkle: ANKLE_IN_STRENGTH.has(id),
+        }
+      })
+      .filter((exercise): exercise is NonNullable<typeof exercise> => exercise !== null)
+
+    return { id: section.id, name: section.name, weekday: section.weekday, exercises }
+  })
+
+  const cardio = readTable(routine, findSection(routine, /cardio/))
+    .filter((row) => /^f\d$/i.test(get(row, 'Fase')))
+    .map((row) => ({
+      phase: Number(get(row, 'Fase').replace(/\D/g, '')),
+      tuesday: parseRange(get(row, 'Martes')),
+      thursday: parseRange(get(row, 'Jueves')),
+      saturday: parseRange(get(row, 'Sábado')),
+      weeklyTotal: parseRange(get(row, 'Total objetivo')),
+      modality: get(row, 'Modalidad'),
+      intensity: get(row, 'Intensidad'),
+      progression: get(row, 'Progresión'),
+      avoid: get(row, 'Evitar al inicio'),
+      reduceWhen: get(row, 'Señal para reducir'),
+    }))
+
+  /**
+   * Ankle work is its own programme now, staged by rehab week rather than folded
+   * into the strength days. v2 mixed it in and that is exactly what made it
+   * invisible whenever a Full Body session was rearranged.
+   */
+  const ankleRehab = readTable(routine, findSection(routine, /rehabilitacion tobillo/))
+    .filter((row) => /sem/i.test(get(row, 'Fase')))
+    .map((row) => {
+      const name = get(row, 'Ejercicio')
+      const id = idFor('Rehabilitación tobillo', name)
+      return id === null ? null : {
+        id,
+        name,
+        stage: get(row, 'Fase'),
+        weeks: parseRange(get(row, 'Fase')),
+        sets: rangeToSets(parseRange(get(row, 'Series'))),
+        target: parseTarget(get(row, 'Reps/tiempo')),
+        frequency: get(row, 'Frecuencia'),
+        progression: get(row, 'Progresión'),
+        goal: get(row, 'Objetivo'),
+        baseline: get(row, 'Baseline'),
+        painAllowed: get(row, 'Dolor permitido'),
+        substitution: get(row, 'Sustitución'),
+        advanceCriteria: get(row, 'Criterio avance'),
+        technique: get(row, 'Notas'),
+        isAnkle: true,
+      }
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+
+  const progressionRules = readTable(routine, findSection(routine, /reglas de progresion/)).map(
+    (row) => ({ rule: get(row, 'Regla'), detail: get(row, 'Aplicación'), example: get(row, 'Ejemplo') }),
+  )
+
+  const objectives = readTable(dashboard, findRowIn(dashboard, 'Objetivo', 4) - 1)
+  void objectives
+
+  return {
+    meta: {
+      title: 'Operación Tesis',
+      startDate,
+      checkpointDate,
+      startWeightKg: Number(at(dashboard, 7, 2)) || null,
+      generatedFrom: 'operacion_tesis_tracker_v3_auditado.xlsx',
+    },
+    phases,
+    weekStructure,
+    sessions,
+    cardio,
+    ankleRehab,
+    progressionRules,
+  }
+}
+
+/** A set count as the app stores it: a number, a range, or not programmed. */
+function rangeToSets(range: Range): number | [number, number] | null {
+  if (range === null) return null
+  return range.min === range.max ? range.min : [range.min, range.max]
+}
+
+// ------------------------------------------------------------------- the rest
 
 /** Excel stores dates as a serial number counting from 1899-12-30. */
 function serialToIsoDate(serial: number): string {
@@ -218,298 +562,11 @@ function toIsoDate(date: Date): string {
 
 function asDate(raw: string): string {
   const serial = Number(raw)
-  if (Number.isFinite(serial) && serial > 20_000) return serialToIsoDate(serial)
-  return raw
+  return Number.isFinite(serial) && serial > 20_000 ? serialToIsoDate(serial) : raw
 }
 
-const DASHES = /[–—-]/
-const EMPTY = new Set(['', '—', '-', '–', 'n/a'])
-
-function isEmpty(raw: string): boolean {
-  return EMPTY.has(raw.trim().toLowerCase())
-}
-
-/** "2" -> 2 · "2–3" -> [2, 3] · "—" -> null */
-function parseSets(raw: string): number | [number, number] | null {
-  if (isEmpty(raw)) return null
-  const numbers = raw.match(/\d+/g)?.map(Number) ?? []
-  if (numbers.length === 0) return null
-  if (numbers.length === 1) return numbers[0]
-  return [numbers[0], numbers[1]]
-}
-
-type Target =
-  | { kind: 'reps' | 'repsPerSide'; min: number; max: number }
-  | { kind: 'seconds' | 'secondsPerSide'; seconds: number }
-  | { kind: 'minutes'; min: number; max: number }
-  | { kind: 'minutesByPhase'; byPhase: Array<{ min: number; max: number }> }
-  | { kind: 'freeform'; text: string }
-
-/**
- * The spreadsheet mixes units in one column, so every shape it actually uses
- * gets its own branch. Anything unrecognised is preserved verbatim rather than
- * coerced into a wrong number.
- */
-function parseTarget(raw: string): Target {
-  const text = raw.trim()
-  const perSide = /\/\s*lado/i.test(text)
-
-  // "25–30 / 30–35 / 35–40 / 35–45 min" — one range per phase
-  if (text.includes('/') && /min/i.test(text) && text.split('/').length >= 4) {
-    const byPhase = text
-      .replace(/min/i, '')
-      .split('/')
-      .map((chunk) => {
-        const [min, max] = numbersIn(chunk)
-        return { min, max: max ?? min }
-      })
-    return { kind: 'minutesByPhase', byPhase }
-  }
-
-  if (/min/i.test(text)) {
-    const [min, max] = numbersIn(text)
-    return { kind: 'minutes', min, max: max ?? min }
-  }
-
-  if (/\bs\b|segundo/i.test(text)) {
-    const [seconds] = numbersIn(text)
-    if (seconds !== undefined) {
-      return { kind: perSide ? 'secondsPerSide' : 'seconds', seconds }
-    }
-  }
-
-  const numbers = numbersIn(text)
-  if (numbers.length > 0 && !/ronda/i.test(text)) {
-    const [min, max] = numbers
-    return { kind: perSide ? 'repsPerSide' : 'reps', min, max: max ?? min }
-  }
-
-  return { kind: 'freeform', text }
-}
-
-function numbersIn(text: string): number[] {
-  return (text.match(/\d+(?:[.,]\d+)?/g) ?? []).map((n) => Number(n.replace(',', '.')))
-}
-
-type Load = {
-  /** Starting working load in kg, when the spreadsheet states one. */
-  startKg: number | null
-  /** Load is set per side (plate-loaded machines). */
-  perSide: boolean
-  /** "+5 kg/lado" means 5 kg per side ON TOP of the machine's base or sled. */
-  relativeToBase: boolean
-  bodyweight: boolean
-  /** Load still has to be found in the gym ("Calibrar"). */
-  needsCalibration: boolean
-  /**
-   * Smallest jump for double progression. The spreadsheet never states one —
-   * its "Carga inicial" column is a starting load, not an increment — so this
-   * stays null and the domain layer falls back to a default. Override it here
-   * per exercise once you know what the machine's stack actually allows.
-   */
-  incrementKg: number | null
-  /** Original spreadsheet text, kept so nothing is lost in translation. */
-  raw: string
-}
-
-function parseLoad(raw: string): Load {
-  const text = raw.trim()
-  const [value] = numbersIn(text)
-  const statesKg = value !== undefined && /kg/i.test(text)
-
-  return {
-    startKg: statesKg ? value : null,
-    perSide: /\/\s*lado/i.test(text),
-    relativeToBase: text.startsWith('+'),
-    bodyweight: /corporal/i.test(text),
-    needsCalibration: /calibra/i.test(text),
-    incrementKg: null,
-    raw: isEmpty(text) ? '' : text,
-  }
-}
-
-/**
- * Exercises that load or challenge the ankle. These prompt for a pain score and
- * are the ones `domain/safety.ts` will refuse to progress on a warning sign.
- */
-const ANKLE_PATTERNS = [
-  /knee-to-wall/i,
-  /tal[oó]n/i,
-  /calf/i,
-  /equilibrio/i,
-  /balance/i,
-  /eversi[oó]n/i,
-  /dorsiflexi[oó]n/i,
-  /step-down/i,
-  /prensa/i,
-  /reach/i,
-]
-
-function isAnkleExercise(name: string): boolean {
-  return ANKLE_PATTERNS.some((pattern) => pattern.test(name))
-}
-
-/**
- * The spreadsheet names the same movement differently across days ("Elevación
- * de talón" on Monday, "Calf raise" on Wednesday). Progression and the "last
- * time you did this" lookup both key off the exercise id, so variants collapse
- * onto one canonical id while each session keeps its own display name.
- *
- * Deliberately NOT merged:
- *  - "Bicicleta" (8–10 min warm-up) vs the 25–45 min cardio machine session
- *  - "Glute kickback o abducción" — a genuine either/or, merging would mix loads
- */
-const CANONICAL_IDS: Record<string, string> = {
-  // Variants across the Rutina sheet's session tables.
-  'elevacion-de-talon': 'calf-raise',
-  'equilibrio-unilateral': 'balance-unilateral',
-  'balance-reach': 'balance-unilateral',
-  'curl-femoral-acostado-sentado': 'curl-femoral',
-  'bici-o-eliptica': 'cardio-machine',
-  'bici-eliptica-caminata-estable': 'cardio-machine',
-  // Variants used in the Tracker_Gym log, which names things more loosely than
-  // the program does. Without these the logged history never reaches the
-  // exercise it belongs to.
-  'equilibrio-1-pierna': 'balance-unilateral',
-  'curl-femoral-acostado': 'curl-femoral',
-}
-
-function exerciseId(name: string): string {
-  const slug = slugify(name)
-  return CANONICAL_IDS[slug] ?? slug
-}
-
-function slugify(name: string): string {
-  return name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
-/** "10–23 ago" + a reference year -> ISO start/end dates. */
-const MONTHS: Record<string, number> = {
-  ene: 1, feb: 2, mar: 3, abr: 4, may: 5, jun: 6,
-  jul: 7, ago: 8, sep: 9, oct: 10, nov: 11, dic: 12,
-}
-
-function parseDateRange(raw: string, year: number): { start: string; end: string | null } {
-  // "10–23 ago" · "24 ago–4 oct" · "16 nov–defensa"
-  const [rawStart, rawEnd] = raw.split(DASHES).map((part) => part.trim())
-  const trailingMonth = monthIn(rawEnd ?? '') ?? monthIn(rawStart) ?? 1
-
-  const start = buildDate(rawStart, monthIn(rawStart) ?? trailingMonth, year)
-  const end = rawEnd && !/defensa/i.test(rawEnd)
-    ? buildDate(rawEnd, monthIn(rawEnd) ?? trailingMonth, year)
-    : null
-
-  return { start, end }
-}
-
-function monthIn(text: string): number | undefined {
-  const match = text.match(/[a-záéíóú]{3}/i)
-  return match ? MONTHS[normalize(match[0])] : undefined
-}
-
-function buildDate(text: string, month: number, year: number): string {
-  const [day] = numbersIn(text)
-  return `${year}-${String(month).padStart(2, '0')}-${String(day ?? 1).padStart(2, '0')}`
-}
-
-// ------------------------------------------------------------------ sections
-
-const WEEKDAY_BY_NAME: Record<string, string> = {
-  lunes: 'monday',
-  martes: 'tuesday',
-  miercoles: 'wednesday',
-  jueves: 'thursday',
-  viernes: 'friday',
-  sabado: 'saturday',
-  domingo: 'sunday',
-}
-
-/** Session tables in the Rutina sheet, keyed by their header text. */
-const SESSION_SECTIONS = [
-  { heading: 'FULL BODY A · LUNES', id: 'full_body_a', name: 'Full Body A', weekday: 'monday' },
-  { heading: 'CARDIO + CORE · MARTES', id: 'cardio_core', name: 'Cardio + core', weekday: 'tuesday' },
-  { heading: 'FULL BODY B · MIÉRCOLES', id: 'full_body_b', name: 'Full Body B', weekday: 'wednesday' },
-  { heading: 'CARDIO + TOBILLO · JUEVES', id: 'cardio_ankle', name: 'Cardio + tobillo', weekday: 'thursday' },
-  { heading: 'FULL BODY C · VIERNES', id: 'full_body_c', name: 'Full Body C', weekday: 'friday' },
-] as const
-
-function buildProgram(dashboard: Grid, routine: Grid) {
-  const startDate = asDate(at(dashboard, 4, 2))
-  const checkpointDate = asDate(at(dashboard, 5, 2))
-  const year = Number(startDate.slice(0, 4))
-
-  const phases = tableRows(routine, findRow(routine, 'Fase'), 10)
-    .filter((row) => /^fase/i.test(row[0]))
-    .map((row, index) => {
-      const { start, end } = parseDateRange(row[1], year)
-      const [rirMin, rirMax] = numbersIn(row[5])
-      return {
-        id: index + 1,
-        name: row[0].replace(/^fase\s*\d+\s*·\s*/i, '').trim(),
-        startDate: start,
-        endDate: end,
-        goal: row[2],
-        mainSets: parseSets(row[3]),
-        accessorySets: parseSets(row[4]),
-        targetRir: { min: rirMin, max: rirMax ?? rirMin },
-        weeklyCardioMinutes: (() => {
-          const [min, max] = numbersIn(row[6])
-          return { min, max: max ?? min }
-        })(),
-        coreFrequency: row[7],
-        ankleStage: row[8],
-        advanceCriteria: row[9],
-      }
-    })
-
-  const weekStructure = tableRows(routine, findRow(routine, 'Día'), 10)
-    .filter((row) => WEEKDAY_BY_NAME[normalize(row[0])])
-    .map((row) => ({
-      weekday: WEEKDAY_BY_NAME[normalize(row[0])],
-      block: row[1],
-      focus: row[2],
-      hasStrength: /^s[ií]$/i.test(row[3]),
-      cardio: isEmpty(row[4]) ? null : row[4],
-      hasCore: /^s[ií]$/i.test(row[5]),
-      hasAnkle: /^s[ií]$/i.test(row[6]),
-      intensity: row[7],
-      notes: row[8],
-    }))
-
-  const sessions = SESSION_SECTIONS.map(({ heading, ...session }) => {
-    const headerRow = findRow(routine, heading) + 1
-    const exercises = tableRows(routine, headerRow, 10)
-      .filter((row) => /^\d+$/.test(row[0]))
-      .map((row) => {
-        const name = row[1]
-        return {
-          id: exerciseId(name),
-          name,
-          order: Number(row[0]),
-          setsByPhase: {
-            1: parseSets(row[2]),
-            2: parseSets(row[3]),
-            3: parseSets(row[4]),
-            4: parseSets(row[5]),
-          },
-          target: parseTarget(row[6]),
-          load: parseLoad(row[7]),
-          progression: row[8],
-          goal: row[9],
-          isAnkle: isAnkleExercise(name),
-        }
-      })
-
-    return { ...session, exercises }
-  })
-
-  // The Dashboard sheet states what the program is for and the rules it runs by.
-  // Both belong with the program rather than being reinvented in the interface.
+/** The Dashboard's own statement of what the programme is for. */
+function buildDashboardExtras(dashboard: Grid) {
   const objectives = tableRows(dashboard, findRowIn(dashboard, 'Objetivo', 4), 8)
     .filter((row) => row[3] !== '')
     .map((row) => ({
@@ -524,93 +581,56 @@ function buildProgram(dashboard: Grid, routine: Grid) {
     .filter((row) => row[10] !== '' && row[11] !== '')
     .map((row) => ({ rule: row[10], detail: row[11] }))
 
-  const progressionRules = tableRows(routine, findRow(routine, 'Regla'), 2).map((row) => ({
-    rule: row[0],
-    detail: row[1],
-  }))
-
-  return {
-    meta: {
-      title: 'Operación Tesis',
-      startDate,
-      checkpointDate,
-      startWeightKg: Number(at(dashboard, 7, 2)) || null,
-      generatedFrom: 'operacion_tesis_tracker_v2.xlsx',
-    },
-    phases,
-    weekStructure,
-    sessions,
-    objectives,
-    keyRules,
-    progressionRules,
-  }
+  return { objectives, keyRules }
 }
 
-function buildAnkleProtocol(ankle: Grid) {
-  const baselineHeading = (at(ankle, 4, 1) || '').trim()
-  const baselineDate = baselineHeading.match(/(\d{2})\/(\d{2})\/(\d{4})/)
-
-  const baseline = tableRows(ankle, findRow(ankle, 'Métrica'), 5).map((row) => ({
-    metric: row[0],
-    result: row[1],
-    interpretation: row[2],
-    initialGoal: row[3],
-    notes: row[4],
-  }))
-
-  const protocol = tableRows(ankle, findRow(ankle, 'Fase'), 10).map((row) => ({
-    stage: row[0],
-    weeks: row[1],
-    exercise: row[2],
-    sets: parseSets(row[3]),
-    target: parseTarget(row[4]),
-    frequency: row[5],
-    progression: row[6],
-    stopSignal: row[7],
-    goal: row[8],
-    notes: row[9],
-  }))
-
-  const safetyRow = findRow(ankle, '⚠️ Seguridad')
-  const safetyNotes = [at(ankle, safetyRow + 1, 1), at(ankle, safetyRow + 2, 1)].filter(Boolean)
-
+function buildAnkleBaseline(ankle: Grid) {
+  const heading = at(ankle, findRow(ankle, 'Métrica') - 1, 1)
+  const date = heading.match(/(\d{2})\/(\d{2})\/(\d{4})/)
   return {
-    baselineDate: baselineDate
-      ? `${baselineDate[3]}-${baselineDate[2]}-${baselineDate[1]}`
-      : null,
-    baseline,
-    protocol,
-    safetyNotes,
+    baselineDate: date ? `${date[3]}-${date[2]}-${date[1]}` : null,
+    baseline: tableRows(ankle, findRow(ankle, 'Métrica'), 5).map((row) => ({
+      metric: row[0],
+      result: row[1],
+      interpretation: row[2],
+      initialGoal: row[3],
+      notes: row[4],
+    })),
+    safetyNotes: (() => {
+      const start = findRow(ankle, '⚠️ Seguridad')
+      const lines: string[] = []
+      for (let row = start + 1; at(ankle, row, 1) !== ''; row++) lines.push(at(ankle, row, 1))
+      return lines
+    })(),
   }
 }
 
 function buildSources(sources: Grid) {
-  const references = tableRows(sources, findRow(sources, 'Fuente'), 4).map((row) => ({
-    source: row[0],
-    supports: row[1],
-    reference: row[2],
-    url: row[3],
-  }))
-
   const collect = (heading: string) => {
     const start = findRow(sources, heading)
     const lines: string[] = []
-    for (let row = start + 1; ; row++) {
-      const text = at(sources, row, 1)
-      if (text === '') break
-      lines.push(text)
-    }
+    for (let row = start + 1; at(sources, row, 1) !== ''; row++) lines.push(at(sources, row, 1))
     return lines
   }
-
   return {
-    references,
+    references: tableRows(sources, findRow(sources, 'Fuente'), 4).map((row) => ({
+      source: row[0],
+      supports: row[1],
+      reference: row[2],
+      url: row[3],
+    })),
     notes: collect('Notas importantes'),
     programCriteria: collect('Criterio del programa'),
   }
 }
 
-/** The 8-Aug session, converted into the app's own SetLog shape. */
+
+/**
+ * The baseline session from the Tracker_Gym sheet, in the app's own shape.
+ *
+ * Exercise ids go through the canonical registry, same as the programme, so the
+ * seeded history files under the same identity as everything logged since.
+ */
 function buildFirstSession(gym: Grid) {
   const headerRow = findRow(gym, 'Fecha')
   const rows = tableRows(gym, headerRow, 15)
@@ -620,56 +640,41 @@ function buildFirstSession(gym: Grid) {
   const sets: unknown[] = []
 
   for (const row of rows) {
-    const exerciseName = row[2]
-    if (!exerciseName) continue
-    const id = exerciseId(exerciseName)
+    const name = row[2]
+    if (!name) continue
+    const id = idFor('Tracker_Gym', name)
+    if (!id) continue
+
     const anklePain = row[11] === '' ? null : Number(row[11])
-    const rir = row[10] === '' ? null : row[10]
+    const pairs: Array<[string, string]> = [[row[4], row[5]], [row[6], row[7]], [row[8], row[9]]]
+    const measured = pairs.filter(([load, reps]) => !isEmpty(load) || !isEmpty(reps))
 
-    // Columns E/F, G/H, I/J hold up to three load+reps pairs.
-    const pairs: Array<[string, string]> = [
-      [row[4], row[5]],
-      [row[6], row[7]],
-      [row[8], row[9]],
-    ]
-
-    pairs.forEach(([load, reps], index) => {
-      if (isEmpty(load) && isEmpty(reps)) return
-      const [loadValue] = numbersIn(load)
+    const push = (load: string, reps: string, index: number) => {
+      const [value] = numbersIn(load)
       sets.push({
         exerciseId: id,
-        exerciseName,
+        exerciseName: name,
         setNumber: index + 1,
-        load: /corporal|lesionado|sano/i.test(load) ? null : (loadValue ?? null),
-        unit: /corporal/i.test(load) ? 'bodyweight' : loadValue !== undefined ? 'kg' : 'bodyweight',
+        load: /corporal|lesionado|sano/i.test(load) ? null : (value ?? null),
+        unit: /corporal/i.test(load) ? 'bodyweight' : value !== undefined ? 'kg' : 'bodyweight',
         loadRaw: load,
         reps: numbersIn(reps)[0] ?? null,
-        rir,
-        anklePain: Number.isFinite(anklePain) ? anklePain : null,
-        note: row[13] || null,
-      })
-    })
-
-    if (pairs.every(([load, reps]) => isEmpty(load) && isEmpty(reps))) {
-      sets.push({
-        exerciseId: id,
-        exerciseName,
-        setNumber: 1,
-        load: null,
-        unit: 'bodyweight',
-        loadRaw: row[3],
-        reps: null,
-        rir,
+        rir: row[10] === '' ? null : row[10],
         anklePain: Number.isFinite(anklePain) ? anklePain : null,
         note: row[13] || null,
       })
     }
+
+    if (measured.length > 0) measured.forEach(([load, reps], i) => push(load, reps, i))
+    // A row with only a note still belongs in the log; the note is the data.
+    else push('', '', 0)
   }
 
   return { date, type: 'full_body_a', phase: 1, completed: true, sets }
 }
 
 // ---------------------------------------------------------------------- main
+
 
 function main(): void {
   if (!existsSync(WORKBOOK)) {
@@ -680,30 +685,31 @@ function main(): void {
   }
 
   const workbook = readWorkbook(WORKBOOK)
-
   const sheet = (name: string): Grid => {
     const worksheet = workbook.get(name)
     if (!worksheet) {
-      throw new Error(
-        `Missing worksheet "${name}". Found: ${[...workbook.keys()].join(', ')}`,
-      )
+      throw new Error(`Missing worksheet "${name}". Found: ${[...workbook.keys()].join(', ')}`)
     }
     return worksheet
   }
 
-  const program = buildProgram(sheet('Dashboard'), sheet('Rutina'))
-  const ankleProtocol = buildAnkleProtocol(sheet('Tobillo'))
+  const program = {
+    ...buildProgram(sheet('Dashboard'), sheet('Rutina')),
+    ...buildDashboardExtras(sheet('Dashboard')),
+  }
+  const ankleProtocol = {
+    ...buildAnkleBaseline(sheet('Tobillo')),
+    protocol: program.ankleRehab,
+  }
   const sources = buildSources(sheet('Fuentes'))
   const firstSession = buildFirstSession(sheet('Tracker_Gym'))
 
   mkdirSync(OUT_DIR, { recursive: true })
   const write = (file: string, data: unknown) => {
-    const path = resolve(OUT_DIR, file)
     const body = file.endsWith('.json')
       ? `${JSON.stringify(data, null, 2)}\n`
       : `# Generated by scripts/import-excel.ts — edit freely, it is not regenerated automatically.\n${stringify(data, { lineWidth: 100 })}`
-    writeFileSync(path, body, 'utf8')
-    return path
+    writeFileSync(resolve(OUT_DIR, file), body, 'utf8')
   }
 
   write('program.yaml', program)
@@ -711,14 +717,24 @@ function main(): void {
   write('sources.yaml', sources)
   if (firstSession) write('first-session.json', firstSession)
 
-  const exerciseCount = program.sessions.reduce((sum, s) => sum + s.exercises.length, 0)
+  const exercises = program.sessions.reduce((sum, s) => sum + s.exercises.length, 0)
   console.log('Imported into content/')
   console.log(`  phases            ${program.phases.length}`)
   console.log(`  sessions          ${program.sessions.length}`)
-  console.log(`  exercises         ${exerciseCount}`)
-  console.log(`  ankle protocol    ${ankleProtocol.protocol.length} steps`)
+  console.log(`  exercises         ${exercises}`)
+  console.log(`  cardio phases     ${program.cardio.length}`)
+  console.log(`  ankle rehab       ${program.ankleRehab.length} steps`)
+  console.log(`  objectives        ${program.objectives.length}`)
   console.log(`  sources           ${sources.references.length}`)
   console.log(`  seeded sets       ${firstSession?.sets.length ?? 0} (${firstSession?.date})`)
+
+  if (unmapped.length > 0) {
+    console.log('\n  ⚠️  Sin id canónico — revisar antes de confiar en el historial:')
+    for (const { section, name } of unmapped) console.log(`     ${section}: "${name}"`)
+    console.log('\n  Añádelos a EXERCISE_REGISTRY en src/domain/exercise-ids.ts.')
+  } else {
+    console.log('\n  ✅ Todos los ejercicios resolvieron a un id canónico.')
+  }
 }
 
 try {

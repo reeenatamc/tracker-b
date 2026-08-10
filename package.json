@@ -18,7 +18,9 @@
     "check": "biome check",
     "import:excel": "tsx scripts/import-excel.ts",
     "icons": "tsx scripts/generate-icons.ts",
-    "deploy": "npm run build && node scripts/deploy.mjs"
+    "deploy": "npm run build && node scripts/deploy.mjs",
+    "verify:import": "tsx scripts/verify-import.ts",
+    "example": "tsx scripts/make-example.ts"
   },
   "dependencies": {
     "@journeyapps/wa-sqlite": "^1.7.2",

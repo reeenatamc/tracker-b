@@ -15,6 +15,7 @@ import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
 import { QuickFinisher } from "@/components/QuickFinisher";
 import { useRest } from "@/components/RestTimer";
+import { SessionClock } from "@/components/SessionClock";
 import { SessionComplete, type NextTarget } from "@/components/SessionComplete";
 import { ExerciseLogger, type NewSet } from "@/components/ExerciseLogger";
 import { ExerciseNav, ExerciseStrip } from "@/components/ExerciseStrip";
@@ -115,10 +116,27 @@ function Today() {
 			phase: phase.id,
 			completed: false,
 			notes: null,
+			startedAt: Date.now(),
+			endedAt: null,
 			skippedExerciseIds: [],
 			extraExerciseIds: [],
 		});
 		return id;
+	}
+
+	function startSession() {
+		const id = ensureSession();
+		collections.sessions.update(id, (draft) => {
+			draft.startedAt ??= Date.now();
+		});
+	}
+
+	function finishSession() {
+		if (!session) return;
+		collections.sessions.update(session.id, (draft) => {
+			draft.endedAt = Date.now();
+			draft.completed = true;
+		});
 	}
 
 	function saveSet(newSet: NewSet) {
@@ -128,7 +146,17 @@ function Today() {
 			sessionId: ensureSession(),
 		});
 		// Approach sets do not earn a full rest, and timed work is its own timer.
-		if (!newSet.isWarmup && newSet.unit !== "minutes") rest.start();
+		if (newSet.isWarmup || newSet.unit === "minutes") return;
+
+		/*
+		 * v3 states rest per exercise — 90–120 s on the leg press, 60 s on the
+		 * cable crunch. Starting at the low end of that range and letting you add
+		 * time beats a single global number that is wrong for both.
+		 */
+		const prescribed = exercises.find(
+			(exercise) => exercise.id === newSet.exerciseId,
+		)?.restSeconds;
+		rest.start(prescribed?.min);
 	}
 
 	function saveOverride(exerciseId: string, changes: OverrideChanges) {
@@ -254,7 +282,9 @@ function Today() {
 		customExercises.find((exercise) => exercise.id === exerciseId)?.name ??
 		exerciseId;
 
-	const isComplete = exercises.length > 0 && done.size === exercises.length;
+	const isComplete =
+		session?.endedAt != null ||
+		(exercises.length > 0 && done.size === exercises.length);
 
 	// What each exercise's next target became, given today. Computed against
 	// today's own sets so it reads what you just did, not the session before it.
@@ -309,7 +339,9 @@ function Today() {
 							records={
 								session ? personalRecords(sessions, sets, session.id) : []
 							}
-							minutes={session ? sessionMinutes(sets, session.id) : null}
+							minutes={
+								session ? sessionMinutes(session, sets, session.id) : null
+							}
 							volumeChange={
 								session ? volumeChange(sessions, sets, session.id) : null
 							}
@@ -318,6 +350,16 @@ function Today() {
 							exerciseName={exerciseName}
 						/>
 					) : null}
+
+					<div className="px-2">
+						<SessionClock
+							startedAt={session?.startedAt ?? null}
+							endedAt={session?.endedAt ?? null}
+							onStart={startSession}
+							onFinish={finishSession}
+							canFinish={done.size > 0}
+						/>
+					</div>
 
 					<section className="card">
 						<ExerciseStrip

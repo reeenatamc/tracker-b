@@ -5,6 +5,7 @@
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
 import { registerServiceWorker } from "@/lib/register-service-worker";
+import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
 import { syncSeed } from "@/lib/seed";
 import { type Collections, getCollections } from "./collections";
 
@@ -27,6 +28,13 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 				// Brings in the baseline session, so the very first workout already has
 				// history to progress from.
 				syncSeed(collections);
+
+				// Re-points records logged under name-derived ids. Idempotent, so it
+				// costs nothing after the first launch.
+				const migration = migrateExerciseIds(collections);
+				if (migration.setsMigrated > 0 || migration.unmapped.length > 0) {
+					console.info("Migración de ids de ejercicio:", migration);
+				}
 				if (!cancelled) setStatus({ state: "ready", collections });
 			},
 			(error: unknown) => {

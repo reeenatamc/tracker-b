@@ -18,6 +18,8 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 		phase: 1,
 		completed: false,
 		notes: null,
+		startedAt: null,
+		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
 		...overrides,

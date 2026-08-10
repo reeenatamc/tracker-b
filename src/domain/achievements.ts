@@ -249,15 +249,23 @@ export function personalRecords(
 }
 
 /**
- * How long the session took, in minutes, from the first set logged to the last.
+ * How long the session took, in minutes.
  *
- * Null for sessions logged before writes were timestamped, and for a session
- * with a single set — one moment is not a duration.
+ * Prefers the times you marked. Falls back to first-set-to-last-set for sessions
+ * logged before the clock existed, which undercounts — it cannot see the warm-up
+ * or the stretching — but is better than showing nothing for the history that is
+ * already there.
  */
 export function sessionMinutes(
+	session: SessionRecord | undefined,
 	sets: readonly SetRecord[],
 	sessionId: string,
 ): number | null {
+	if (session?.startedAt && session.endedAt) {
+		const minutes = Math.round((session.endedAt - session.startedAt) / 60_000);
+		return minutes > 0 ? minutes : null;
+	}
+
 	const stamps = sets
 		.filter((set) => set.sessionId === sessionId)
 		.map((set) => (set as { updatedAt?: number }).updatedAt)
@@ -268,6 +276,24 @@ export function sessionMinutes(
 		(Math.max(...stamps) - Math.min(...stamps)) / 60_000,
 	);
 	return minutes > 0 ? minutes : null;
+}
+
+/** Typical session length, across every session that has a measurable one. */
+export function averageSessionMinutes(
+	sessions: readonly SessionRecord[],
+	sets: readonly SetRecord[],
+): { minutes: number; from: number } | null {
+	const durations = sessions
+		.map((session) => sessionMinutes(session, sets, session.id))
+		.filter((minutes): minutes is number => minutes !== null);
+
+	if (durations.length === 0) return null;
+	return {
+		minutes: Math.round(
+			durations.reduce((a, b) => a + b, 0) / durations.length,
+		),
+		from: durations.length,
+	};
 }
 
 /**

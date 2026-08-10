@@ -73,6 +73,13 @@ export function customToExercise(
 		load: custom.load,
 		progression: custom.progression,
 		goal: custom.goal,
+		muscle: "",
+		rir: null,
+		// Your own exercises have no prescribed rest, so the timer falls back to
+		// its default rather than inventing one.
+		restSeconds: null,
+		substitution: "",
+		technique: "",
 		isAnkle: custom.isAnkle,
 	};
 }

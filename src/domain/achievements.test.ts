@@ -20,6 +20,8 @@ function session(id: string, date: string): SessionRecord {
 		phase: 1,
 		completed: true,
 		notes: null,
+		startedAt: null,
+		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
 	};
@@ -349,7 +351,16 @@ describe("weekStreak", () => {
 });
 
 describe("sessionMinutes", () => {
-	it("measures first set to last", () => {
+	it("uses the times you marked when they are there", () => {
+		const marked = {
+			...session("s1", "2026-08-10"),
+			startedAt: 1_000_000,
+			endedAt: 1_000_000 + 62 * 60_000,
+		};
+		expect(sessionMinutes(marked, [], "s1")).toBe(62);
+	});
+
+	it("falls back to first set to last for sessions logged before the clock", () => {
 		const sets = [
 			{ ...set("s1", "a", { setNumber: 1 }), updatedAt: 1_000_000 },
 			{
@@ -359,10 +370,12 @@ describe("sessionMinutes", () => {
 			// `updatedAt` is added by the syncable wrapper at write time, so it is
 			// not part of the declared row type.
 		] as unknown as SetRecord[];
-		expect(sessionMinutes(sets, "s1")).toBe(45);
+		expect(sessionMinutes(session("s1", "2026-08-10"), sets, "s1")).toBe(45);
 	});
 
 	it("is null for sessions logged before writes were timestamped", () => {
-		expect(sessionMinutes([set("s1", "a")], "s1")).toBeNull();
+		expect(
+			sessionMinutes(session("s1", "2026-08-10"), [set("s1", "a")], "s1"),
+		).toBeNull();
 	});
 });

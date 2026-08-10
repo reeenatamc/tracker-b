@@ -66,6 +66,7 @@ export function formatTarget(target: Target, phase: PhaseId): string {
 			const forPhase = target.byPhase[phase - 1] ?? target.byPhase[0];
 			return `${range(forPhase.min, forPhase.max)} min`;
 		}
+		case "rounds":
 		case "freeform":
 			return target.text;
 	}
@@ -83,6 +84,8 @@ export function targetUnit(target: Target): string {
 		case "minutes":
 		case "minutesByPhase":
 			return "min";
+		case "rounds":
+			return "rondas";
 		case "freeform":
 			return "";
 	}

@@ -47,6 +47,7 @@ export const Target = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("secondsPerSide"), seconds: z.number() }),
 	z.object({ kind: z.literal("minutes"), min: z.number(), max: z.number() }),
 	z.object({ kind: z.literal("minutesByPhase"), byPhase: z.array(Range) }),
+	z.object({ kind: z.literal("rounds"), text: z.string() }),
 	z.object({ kind: z.literal("freeform"), text: z.string() }),
 ]);
 export type Target = z.infer<typeof Target>;
@@ -75,6 +76,16 @@ export const Exercise = z.object({
 	load: Load,
 	progression: z.string(),
 	goal: z.string(),
+	/** Muscle or movement pattern, as the spreadsheet classifies it. */
+	muscle: z.string().default(""),
+	/** Reps in reserve for this exercise. Null on warm-ups, which state RPE. */
+	rir: Range.nullable().default(null),
+	/** Rest between sets, in seconds. The timer starts from the low end. */
+	restSeconds: Range.nullable().default(null),
+	/** What to do instead when the machine is taken. */
+	substitution: z.string().default(""),
+	/** The one cue that matters for this movement. */
+	technique: z.string().default(""),
 	/** Loads or challenges the ankle: prompts for pain, gated by safety rules. */
 	isAnkle: z.boolean(),
 });
@@ -106,13 +117,15 @@ export const Phase = z.object({
 	/** Null on the final phase: it runs until the thesis defence. */
 	endDate: IsoDate.nullable(),
 	goal: z.string(),
-	mainSets: SetCount,
-	accessorySets: SetCount,
+	/** Working sets per exercise for this phase — v3 states one figure, not two. */
+	workingSets: SetCount.default(2),
 	targetRir: Range,
 	weeklyCardioMinutes: Range,
-	coreFrequency: z.string(),
+	coreWeeklySets: z.string().default(""),
 	ankleStage: z.string(),
-	advanceCriteria: z.string(),
+	/** What moves forward this phase, and what deliberately does not. */
+	progresses: z.string().default(""),
+	avoid: z.string().default(""),
 });
 export type Phase = z.infer<typeof Phase>;
 
@@ -124,10 +137,49 @@ export const WeekDayPlan = z.object({
 	cardio: z.string().nullable(),
 	hasCore: z.boolean(),
 	hasAnkle: z.boolean(),
-	intensity: z.string(),
-	notes: z.string(),
+	intensity: z.string().default(""),
+	duration: z.string().default(""),
+	notes: z.string().default(""),
 });
 export type WeekDayPlan = z.infer<typeof WeekDayPlan>;
+
+export const CardioPrescription = z.object({
+	phase: PhaseId,
+	tuesday: Range.nullable(),
+	thursday: Range.nullable(),
+	saturday: Range.nullable(),
+	weeklyTotal: Range.nullable(),
+	modality: z.string(),
+	intensity: z.string(),
+	progression: z.string(),
+	avoid: z.string(),
+	reduceWhen: z.string(),
+});
+export type CardioPrescription = z.infer<typeof CardioPrescription>;
+
+/**
+ * Ankle rehabilitation, staged by week rather than folded into the strength
+ * days. Mixing it in is what made it disappear whenever a session was
+ * rearranged.
+ */
+export const AnkleExercise = z.object({
+	id: z.string(),
+	name: z.string(),
+	stage: z.string(),
+	weeks: Range.nullable(),
+	sets: SetCount,
+	target: Target,
+	frequency: z.string(),
+	progression: z.string(),
+	goal: z.string(),
+	baseline: z.string(),
+	painAllowed: z.string(),
+	substitution: z.string(),
+	advanceCriteria: z.string(),
+	technique: z.string(),
+	isAnkle: z.literal(true),
+});
+export type AnkleExercise = z.infer<typeof AnkleExercise>;
 
 export const Program = z.object({
 	meta: z.object({
@@ -156,7 +208,15 @@ export const Program = z.object({
 	keyRules: z
 		.array(z.object({ rule: z.string(), detail: z.string() }))
 		.default([]),
-	progressionRules: z.array(z.object({ rule: z.string(), detail: z.string() })),
+	cardio: z.array(CardioPrescription).default([]),
+	ankleRehab: z.array(AnkleExercise).default([]),
+	progressionRules: z.array(
+		z.object({
+			rule: z.string(),
+			detail: z.string(),
+			example: z.string().default(""),
+		}),
+	),
 });
 export type Program = z.infer<typeof Program>;
 
@@ -173,20 +233,7 @@ export const AnkleProtocol = z.object({
 			notes: z.string(),
 		}),
 	),
-	protocol: z.array(
-		z.object({
-			stage: z.string(),
-			weeks: z.string(),
-			exercise: z.string(),
-			sets: SetCount,
-			target: Target,
-			frequency: z.string(),
-			progression: z.string(),
-			stopSignal: z.string(),
-			goal: z.string(),
-			notes: z.string(),
-		}),
-	),
+	protocol: z.array(AnkleExercise),
 	safetyNotes: z.array(z.string()),
 });
 export type AnkleProtocol = z.infer<typeof AnkleProtocol>;
@@ -218,6 +265,14 @@ export const SessionRecord = z.object({
 	phase: PhaseId,
 	completed: z.boolean(),
 	notes: z.string().nullable(),
+	/**
+	 * When the session actually began and ended, in epoch milliseconds. Explicit
+	 * rather than inferred from the first and last set: the warm-up before the
+	 * first logged set and the stretching after the last one are part of how long
+	 * you were there, and inferring would quietly undercount both.
+	 */
+	startedAt: z.number().nullable().default(null),
+	endedAt: z.number().nullable().default(null),
 	/** Programmed today but skipped — machine taken, feeling off, whatever. */
 	skippedExerciseIds: z.array(z.string()).default([]),
 	/** Custom exercises pulled into this session. */
