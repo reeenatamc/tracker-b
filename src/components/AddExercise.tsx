@@ -109,7 +109,7 @@ export function AddExercise({
 				</p>
 			</fieldset>
 
-			<div className="mt-5 flex gap-3">
+			<div className="mt-5 grid grid-cols-2 gap-3">
 				<Stepper
 					label="Series"
 					value={sets}
@@ -149,7 +149,7 @@ export function AddExercise({
 			</div>
 
 			{kind === "load" ? (
-				<div className="mt-5 flex gap-3">
+				<div className="mt-5 grid grid-cols-2 gap-3">
 					<Stepper
 						label="Carga inicial"
 						value={startKg}

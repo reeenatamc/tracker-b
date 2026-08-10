@@ -71,7 +71,7 @@ export function ExerciseSettings({
 			</p>
 
 			{usesLoad ? (
-				<div className="mt-5 flex gap-3">
+				<div className="mt-5 grid grid-cols-2 gap-3">
 					<Stepper
 						label="Carga inicial"
 						value={startKg}
@@ -99,7 +99,7 @@ export function ExerciseSettings({
 			) : null}
 
 			{repRange ? (
-				<div className="mt-5 flex gap-3">
+				<div className="mt-5 grid grid-cols-2 gap-3">
 					<Stepper
 						label="Reps mín."
 						value={repMin}
@@ -117,7 +117,7 @@ export function ExerciseSettings({
 				</div>
 			) : null}
 
-			<div className="mt-5 flex gap-3">
+			<div className="mt-5 grid grid-cols-2 gap-3">
 				<Stepper
 					label="Series"
 					value={setCount}
@@ -144,7 +144,7 @@ export function ExerciseSettings({
 				Guardar
 			</PrimaryButton>
 
-			<div className="mt-3 flex gap-3">
+			<div className="mt-3 grid grid-cols-2 gap-3">
 				<button
 					type="button"
 					onClick={onReset}

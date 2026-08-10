@@ -12,8 +12,9 @@
  */
 
 import type { Progress } from "@/domain/achievements";
-import { consistencyScore, deltaFromBaseline } from "@/domain/progress";
+import { consistencyScore, deltaFromBaseline, series } from "@/domain/progress";
 import type { AnkleCheck, ProgressCheck, Program } from "@/domain/schema";
+import { formatDayMonth } from "@/lib/format";
 
 type Reading = {
 	/** The value, or null when nothing has been logged to answer this yet. */
@@ -94,6 +95,54 @@ export function Dashboard({
 			</section>
 
 			<section className="card">
+				<div className="mb-1 flex items-baseline justify-between">
+					<p className="eyebrow">Medidas</p>
+					{latestCheck ? (
+						<p className="eyebrow">{formatDayMonth(latestCheck.date)}</p>
+					) : null}
+				</div>
+				<p className="mb-4 text-[0.8125rem] text-faint">
+					{latestCheck
+						? "Lo último que registraste, y cuánto se movió desde el inicio."
+						: "Todavía sin medidas. Regístralas abajo y aparecerán aquí."}
+				</p>
+
+				<dl className="grid grid-cols-2 gap-4">
+					{MEASURES.map(({ field, label, unit }) => {
+						const points = series(checks, field);
+						const latest = points.at(-1)?.value ?? null;
+						const delta = deltaFromBaseline(checks, field);
+						return (
+							<div key={field}>
+								<dt className="eyebrow">{label}</dt>
+								<dd className="tabular mt-1 text-xl font-bold text-ink">
+									{latest === null ? "—" : `${latest} ${unit}`}
+								</dd>
+								{delta !== null ? (
+									<dd
+										className={`tabular mt-0.5 text-[0.6875rem] ${
+											delta < 0
+												? "text-reserve"
+												: delta > 0
+													? "text-effort"
+													: "text-faint"
+										}`}
+									>
+										{delta > 0 ? "+" : ""}
+										{delta} {unit} desde el inicio
+									</dd>
+								) : latest !== null ? (
+									<dd className="mt-0.5 text-[0.6875rem] text-faint">
+										Falta una segunda medida para comparar
+									</dd>
+								) : null}
+							</div>
+						);
+					})}
+				</dl>
+			</section>
+
+			<section className="card">
 				<p className="eyebrow mb-1">Objetivos del plan</p>
 				<p className="mb-4 text-[0.8125rem] text-faint">
 					Cómo va cada uno, con lo que has registrado.
@@ -152,6 +201,14 @@ export function Dashboard({
 		</>
 	);
 }
+
+/** The four the spreadsheet tracks, in the order it lists them. */
+const MEASURES = [
+	{ field: "weightKg", label: "Peso", unit: "kg" },
+	{ field: "waistCm", label: "Cintura", unit: "cm" },
+	{ field: "hipCm", label: "Cadera", unit: "cm" },
+	{ field: "thighCm", label: "Muslo", unit: "cm" },
+] as const;
 
 const TONE = {
 	reserve: "text-reserve",

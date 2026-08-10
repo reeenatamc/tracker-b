@@ -41,7 +41,7 @@ export function SetEditor({
 			onClose={onClose}
 			onDelete={onDelete}
 		>
-			<div className="flex gap-3">
+			<div className="grid grid-cols-2 gap-3">
 				{usesLoad ? (
 					<Stepper
 						label="Carga"

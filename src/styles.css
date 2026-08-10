@@ -74,6 +74,8 @@
 		font-family: var(--font-sans);
 		/* Logging happens one-handed between sets; nothing should rubber-band. */
 		overscroll-behavior-y: none;
+		/* No layout may push the page sideways; wide content scrolls in its own box. */
+		overflow-x: hidden;
 		-webkit-font-smoothing: antialiased;
 	}
 

@@ -147,7 +147,7 @@ function Ankle() {
 
 			<section className="card">
 				<p className="eyebrow mb-3">Knee-to-wall · centímetros</p>
-				<div className="flex gap-3">
+				<div className="grid grid-cols-2 gap-3">
 					<Stepper
 						label="Lesionado"
 						value={kneeToWallInjured}
@@ -180,7 +180,7 @@ function Ankle() {
 
 			<section className="card">
 				<p className="eyebrow mb-3">Fuerza y balance · lado lesionado</p>
-				<div className="flex gap-3">
+				<div className="grid grid-cols-2 gap-x-3 gap-y-4">
 					<Stepper
 						label="Calf raises"
 						value={calfRaisesInjured}

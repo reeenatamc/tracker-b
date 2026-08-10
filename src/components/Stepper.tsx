@@ -33,7 +33,7 @@ export function Stepper({
 	const clamp = (next: number) => Math.min(max, Math.max(min, round(next)));
 
 	return (
-		<div className="flex-1">
+		<div className="min-w-0 flex-1">
 			<p className="eyebrow mb-2 text-center">{label}</p>
 			<div className="flex items-stretch gap-1">
 				<StepButton
@@ -45,7 +45,7 @@ export function Stepper({
 				</StepButton>
 
 				<div className="flex min-w-0 flex-1 flex-col items-center justify-center px-1">
-					<span className="tabular text-3xl leading-none font-semibold text-ink">
+					<span className="tabular truncate text-2xl leading-none font-semibold text-ink">
 						{value === null ? placeholder : formatValue(value)}
 					</span>
 					{unit ? (
@@ -82,7 +82,7 @@ function StepButton({
 			aria-label={label}
 			onClick={onPress}
 			disabled={disabled}
-			className="h-14 w-14 shrink-0 rounded-lg border border-line bg-raised text-2xl text-ink transition-colors active:bg-line disabled:opacity-30"
+			className="h-14 w-11 shrink-0 rounded-xl border border-line bg-raised text-2xl text-ink transition-colors active:bg-line disabled:opacity-30"
 		>
 			{children}
 		</button>

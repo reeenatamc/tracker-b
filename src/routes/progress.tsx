@@ -313,7 +313,7 @@ function CheckEditor({
 			</label>
 
 			<p className="eyebrow mt-6 mb-2">Medidas</p>
-			<div className="flex gap-3">
+			<div className="grid grid-cols-2 gap-3">
 				<Stepper
 					label="Peso"
 					value={weightKg}
@@ -331,7 +331,7 @@ function CheckEditor({
 					unit="cm"
 				/>
 			</div>
-			<div className="mt-3 flex gap-3">
+			<div className="mt-3 grid grid-cols-2 gap-3">
 				<Stepper
 					label="Cadera"
 					value={hipCm}
@@ -351,7 +351,7 @@ function CheckEditor({
 			</div>
 
 			<p className="eyebrow mt-6 mb-2">La semana</p>
-			<div className="flex gap-3">
+			<div className="grid grid-cols-2 gap-3">
 				<Stepper
 					label="Fuerza"
 					value={strengthSessions}
@@ -378,7 +378,7 @@ function CheckEditor({
 				/>
 			</div>
 
-			<div className="mt-3 flex gap-3">
+			<div className="mt-3 grid grid-cols-2 gap-3">
 				<Stepper
 					label="Sueño"
 					value={sleepHours}
