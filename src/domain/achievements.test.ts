@@ -356,7 +356,9 @@ describe("sessionMinutes", () => {
 				...set("s1", "b", { setNumber: 2 }),
 				updatedAt: 1_000_000 + 45 * 60_000,
 			},
-		] as SetRecord[];
+			// `updatedAt` is added by the syncable wrapper at write time, so it is
+			// not part of the declared row type.
+		] as unknown as SetRecord[];
 		expect(sessionMinutes(sets, "s1")).toBe(45);
 	});
 
