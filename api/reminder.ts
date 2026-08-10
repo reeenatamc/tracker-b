@@ -13,8 +13,8 @@
  */
 
 import webpush from "web-push";
-import { connect, env, json } from "./_db.ts";
-import { ensurePushSchema } from "./push.ts";
+import { connect, env, json } from "./_db";
+import { ensurePushSchema } from "./push";
 
 type Row = {
 	endpoint: string;

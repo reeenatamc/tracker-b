@@ -24,6 +24,7 @@ import {
 	copyFileSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
@@ -63,13 +64,24 @@ const env = { VERCEL_PROJECT_ID: projectId, VERCEL_ORG_ID: orgId };
 copyFileSync(resolve(ROOT, "deploy/vercel.json"), resolve(OUT_DIR, "vercel.json"));
 
 /*
- * The sync endpoint ships alongside the static build. Vercel turns any `api/*`
- * file in the uploaded directory into a serverless function, and installs the
- * dependencies listed in a package.json next to it — so the function gets its
+ * The endpoints ship alongside the static build. Vercel turns any `api/*` file
+ * in the uploaded directory into a serverless function, and installs the
+ * dependencies listed in a package.json next to it — so the functions get their
  * driver without the app's whole dependency tree coming along.
+ *
+ * The whole directory is copied rather than a named list: naming them is how
+ * `api/push.ts` and `api/reminder.ts` got written, committed, deployed and then
+ * silently left out of the upload.
  */
 mkdirSync(resolve(OUT_DIR, "api"), { recursive: true });
-copyFileSync(resolve(ROOT, "api/sync.ts"), resolve(OUT_DIR, "api/sync.ts"));
+const apiFiles = readdirSync(resolve(ROOT, "api")).filter(
+	(file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
+);
+if (apiFiles.length === 0) fail("No hay endpoints en `api/`.");
+for (const file of apiFiles) {
+	copyFileSync(resolve(ROOT, "api", file), resolve(OUT_DIR, "api", file));
+}
+console.log(`  Endpoints: ${apiFiles.join(", ")}`);
 
 const { dependencies } = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
 writeFileSync(
@@ -78,7 +90,10 @@ writeFileSync(
 		{
 			name: "operacion-tesis-api",
 			private: true,
-			dependencies: { postgres: dependencies.postgres },
+			dependencies: {
+				postgres: dependencies.postgres,
+				"web-push": dependencies["web-push"],
+			},
 		},
 		null,
 		2,

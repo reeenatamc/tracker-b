@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeReminder } from "./reminder.ts";
+import { composeReminder } from "./reminder";
 
 const SCHEDULE = {
 	monday: "Full Body A",

@@ -12,7 +12,7 @@
  * database, where the rest of her log already is.
  */
 
-import { connect, type Db, env, json } from "./_db.ts";
+import { connect, type Db, env, json } from "./_db";
 
 type Subscription = {
 	endpoint: string;

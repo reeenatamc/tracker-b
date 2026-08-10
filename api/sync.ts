@@ -12,7 +12,7 @@
  * bundle, so it would be decoration rather than a control.
  */
 
-import { connect, type Db, json } from "./_db.ts";
+import { connect, type Db, json } from "./_db";
 
 type Change = {
 	collection: string;
