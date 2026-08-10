@@ -95,6 +95,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
+  // Navigations go to the network first, falling back to cache when offline.
+  // Cache-first here would pin the app to whatever HTML was cached the day it
+  // was installed: the shell names the hashed asset files, so a stale shell
+  // means a permanently stale app no matter how many times it updates.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok && response.type === 'basic') {
+            const copy = response.clone()
+            caches.open(CACHE).then((cache) => cache.put('/', copy))
+          }
+          return response
+        })
+        .catch(() => caches.match('/').then((cached) => cached ?? Response.error())),
+    )
+    return
+  }
+
+  // Everything else is content-hashed, so cache-first is both safe and fast.
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached
@@ -112,7 +132,8 @@ self.addEventListener('fetch', (event) => {
         .catch(() => {
           // Offline and never seen: navigations fall back to the app shell so
           // the app still opens; anything else genuinely fails.
-          if (request.mode === 'navigate') return caches.match('/')
+          // Navigations were handled above; a hashed asset that was never
+          // cached and cannot be fetched has no sensible substitute.
           throw new Error('offline')
         })
     }),
