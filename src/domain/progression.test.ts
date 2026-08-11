@@ -5,12 +5,12 @@ import {
 	makeSets,
 	PROGRAM,
 } from "./__fixtures__/program";
+import { targetSets } from "./phases";
 import {
 	DEFAULT_INCREMENT_KG,
 	decideProgression,
 	judgesRir,
 } from "./progression";
-import { targetSets } from "./phases";
 
 const PHASE_1_RIR = { min: 2, max: 3 };
 const PHASE_3_RIR = { min: 1, max: 2 };

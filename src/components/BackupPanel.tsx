@@ -14,8 +14,8 @@ import {
 	exportBackup,
 	importBackup,
 } from "@/lib/backup";
-import { formatBytes } from "@/lib/photos";
 import { todayIso } from "@/lib/format";
+import { formatBytes } from "@/lib/photos";
 
 type Status =
 	| { state: "idle" }

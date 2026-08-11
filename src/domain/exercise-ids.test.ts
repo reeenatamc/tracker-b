@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	displayName,
 	EXERCISE_REGISTRY,
 	LEGACY_IDS,
-	displayName,
 	migrateLegacyId,
 	resolveExerciseId,
 } from "./exercise-ids";

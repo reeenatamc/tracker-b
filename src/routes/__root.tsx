@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { CollectionsProvider } from "@/db/provider";
 import { RestTimerProvider } from "@/components/RestTimer";
+import { CollectionsProvider } from "@/db/provider";
 import { SyncProvider } from "@/db/sync-provider";
 import appCss from "../styles.css?url";
 

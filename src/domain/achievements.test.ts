@@ -4,11 +4,11 @@ import {
 	loadGains,
 	personalRecords,
 	sessionMinutes,
-	volumeChange,
-	weekStreak,
 	sessionVolume,
 	summarise,
+	volumeChange,
 	weekNumber,
+	weekStreak,
 } from "./achievements";
 import type { SessionRecord, SetRecord } from "./schema";
 

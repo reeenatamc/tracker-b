@@ -16,7 +16,6 @@ import {
 	persistedCollectionOptions,
 } from "@tanstack/browser-db-sqlite-persistence";
 import { createCollection } from "@tanstack/react-db";
-import { syncable } from "./synced";
 import type {
 	AnkleCheck,
 	CustomExercise,
@@ -26,6 +25,7 @@ import type {
 	SessionRecord,
 	SetRecord,
 } from "@/domain/schema";
+import { syncable } from "./synced";
 
 const DATABASE_NAME = "operacion-tesis";
 

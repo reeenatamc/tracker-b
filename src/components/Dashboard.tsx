@@ -13,7 +13,7 @@
 
 import type { Progress } from "@/domain/achievements";
 import { consistencyScore, deltaFromBaseline, series } from "@/domain/progress";
-import type { AnkleCheck, ProgressCheck, Program } from "@/domain/schema";
+import type { AnkleCheck, Program, ProgressCheck } from "@/domain/schema";
 import { formatDayMonth } from "@/lib/format";
 
 type Reading = {

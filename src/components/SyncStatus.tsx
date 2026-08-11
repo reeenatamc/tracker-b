@@ -11,8 +11,8 @@
  */
 
 import { useState } from "react";
-import { DeviceSettings } from "./DeviceSettings";
 import { useSync } from "@/db/sync-provider";
+import { DeviceSettings } from "./DeviceSettings";
 
 export function SyncStatus() {
 	const { state } = useSync();

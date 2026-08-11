@@ -8,11 +8,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { Sheet } from "./Sheet";
 import { useSync } from "@/db/sync-provider";
-import { disablePush, enablePush, type PushState, pushState } from "@/lib/push";
-import { type StorageState, storageState } from "@/lib/persist";
 import { program } from "@/lib/content";
+import { type StorageState, storageState } from "@/lib/persist";
+import { disablePush, enablePush, type PushState, pushState } from "@/lib/push";
+import { Sheet } from "./Sheet";
 
 export function DeviceSettings({ onClose }: { onClose: () => void }) {
 	const { state, syncNow } = useSync();

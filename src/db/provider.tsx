@@ -4,9 +4,9 @@
  */
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
-import { registerServiceWorker } from "@/lib/register-service-worker";
-import { requestPersistence } from "@/lib/persist";
 import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
+import { requestPersistence } from "@/lib/persist";
+import { registerServiceWorker } from "@/lib/register-service-worker";
 import { syncSeed } from "@/lib/seed";
 import { type Collections, getCollections } from "./collections";
 

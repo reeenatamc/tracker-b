@@ -15,8 +15,8 @@
  * they stay on the device that took them and travel in the backup file instead.
  */
 
-import { applyRemote } from "@/db/synced";
 import type { Collections } from "@/db/collections";
+import { applyRemote } from "@/db/synced";
 import { highWaterMark } from "@/domain/sync";
 
 const ENDPOINT = "/api/sync";

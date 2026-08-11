@@ -7,8 +7,8 @@
  */
 
 import { useState } from "react";
-import { TickScale } from "@/components/TickScale";
 import { Stepper } from "@/components/Stepper";
+import { TickScale } from "@/components/TickScale";
 import type { PreviousPerformance } from "@/domain/history";
 import {
 	judgesRir,

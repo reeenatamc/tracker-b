@@ -9,9 +9,9 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { PrimaryButton, NoteField, Sheet } from "@/components/Sheet";
-import { Stepper } from "@/components/Stepper";
 import { Dashboard } from "@/components/Dashboard";
+import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
+import { Stepper } from "@/components/Stepper";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
 import { Trend } from "@/components/Trend";

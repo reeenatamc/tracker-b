@@ -13,30 +13,20 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
 import { CardioBlock } from "@/components/CardioBlock";
-import { QuickFinisher } from "@/components/QuickFinisher";
-import { useRest } from "@/components/RestTimer";
-import { SessionClock } from "@/components/SessionClock";
-import { SessionComplete, type NextTarget } from "@/components/SessionComplete";
 import { ExerciseLogger, type NewSet } from "@/components/ExerciseLogger";
-import { ExerciseNav, ExerciseStrip } from "@/components/ExerciseStrip";
 import {
 	ExerciseSettings,
 	type OverrideChanges,
 } from "@/components/ExerciseSettings";
+import { ExerciseNav, ExerciseStrip } from "@/components/ExerciseStrip";
+import { QuickFinisher } from "@/components/QuickFinisher";
+import { useRest } from "@/components/RestTimer";
+import { SessionClock } from "@/components/SessionClock";
+import { type NextTarget, SessionComplete } from "@/components/SessionComplete";
 import { SetEditor } from "@/components/SetEditor";
 import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
 import { TabBar } from "@/components/TabBar";
 import { useRecords } from "@/db/records";
-import {
-	completedExerciseIds,
-	previousPerformance,
-	setsFor,
-} from "@/domain/history";
-import {
-	resolveSessionExercises,
-	resolveSets,
-	skippedExercises,
-} from "@/domain/personalise";
 import {
 	personalRecords,
 	sessionMinutes,
@@ -50,6 +40,16 @@ import {
 	rehabAsExercise,
 	rehabStageFor,
 } from "@/domain/cardio-day";
+import {
+	completedExerciseIds,
+	previousPerformance,
+	setsFor,
+} from "@/domain/history";
+import {
+	resolveSessionExercises,
+	resolveSets,
+	skippedExercises,
+} from "@/domain/personalise";
 import { phaseForDate } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
 import {

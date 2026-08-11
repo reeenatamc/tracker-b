@@ -8,7 +8,6 @@
  */
 
 import { useLiveQuery } from "@tanstack/react-db";
-import { useCollections } from "./provider";
 import type {
 	AnkleCheck,
 	CustomExercise,
@@ -18,6 +17,7 @@ import type {
 	SessionRecord,
 	SetRecord,
 } from "@/domain/schema";
+import { useCollections } from "./provider";
 
 /**
  * Rows written before sync existed have no `deletedAt` at all, which must read

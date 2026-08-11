@@ -7,9 +7,9 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { TabBar } from "@/components/TabBar";
 import { useEffect, useState } from "react";
 import { Stepper } from "@/components/Stepper";
+import { TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
 import { useRecords } from "@/db/records";
 import { evaluateSafety } from "@/domain/safety";
