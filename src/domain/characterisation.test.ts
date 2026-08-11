@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { SCENARIOS, SESSIONS, SETS } from "./__fixtures__/log";
+import { PHASE_EVENTS, SCENARIOS, SESSIONS, SETS } from "./__fixtures__/log";
 import { PROGRAM } from "./__fixtures__/program";
 import { summarise } from "./achievements";
 import { previousPerformance, setsFor } from "./history";
@@ -143,14 +143,25 @@ describe("lectura del historial, congelada", () => {
 });
 
 describe("resumen de progreso, congelado", () => {
-	const progress = summarise(PROGRAM, SESSIONS, SETS, "2026-08-31");
+	const progress = summarise(
+		PROGRAM,
+		PHASE_EVENTS,
+		SESSIONS,
+		SETS,
+		"2026-08-31",
+	);
 
 	it("cuenta la semana desde el arranque del programa", () => {
 		expect(progress.week).toBe(4);
 	});
 
+	/*
+	 * The one assertion in this file E2 was allowed to move, and only because the
+	 * value changed type rather than meaning: phase 2 is now called "progresion".
+	 * Every progression decision above is untouched.
+	 */
 	it("sitúa la fecha en su fase", () => {
-		expect(progress.phaseId).toBe(2);
+		expect(progress.phaseId).toBe("progresion");
 	});
 
 	it("cuenta sólo las sesiones con algo registrado", () => {

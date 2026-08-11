@@ -50,7 +50,7 @@ import {
 	resolveSets,
 	skippedExercises,
 } from "@/domain/personalise";
-import { phaseForDate } from "@/domain/phases";
+import { phaseForDate, slotOf } from "@/domain/phases";
 import { decideProgression } from "@/domain/progression";
 import {
 	dayPlanForDate,
@@ -72,13 +72,16 @@ function Today() {
 		ankleChecks,
 		overrides,
 		customExercises,
+		phaseEvents,
 	} = useRecords();
 	const rest = useRest();
 	const today = todayIso();
 
-	const phase = phaseForDate(program, today);
+	const phase = phaseForDate(program, phaseEvents, today);
+	// Which prescription column this phase reads. Bridge until E3 — see `slotOf`.
+	const slot = slotOf(program, phase);
 	const dayPlan = dayPlanForDate(program, today);
-	const cardio = cardioFor(program, today);
+	const cardio = cardioFor(program, phaseEvents, today);
 	const rehab = rehabStageFor(program, today);
 
 	/*
@@ -130,6 +133,8 @@ function Today() {
 			id,
 			date: today,
 			templateId: template?.id ?? "unscheduled",
+			// The stamp that makes G1 hold: a session records the phase it was in,
+			// and nothing ever derives it again.
 			phase: phase.id,
 			completed: false,
 			notes: null,
@@ -281,14 +286,17 @@ function Today() {
 
 	const exercises = template
 		? resolveSessionExercises({
+				program,
 				template,
-				phase: phase.id,
+				phase,
 				overrides,
 				customExercises,
 				session,
 			})
 		: [];
-	const putBack = template ? skippedExercises(template, phase.id, session) : [];
+	const putBack = template
+		? skippedExercises(program, template, phase, session)
+		: [];
 	const done = session
 		? completedExerciseIds(sets, session.id)
 		: new Set<string>();
@@ -306,8 +314,9 @@ function Today() {
 
 	const setsOf = (exercise: Exercise) =>
 		resolveSets(
+			program,
 			exercise,
-			phase.id,
+			phase,
 			overrides.find((o) => o.exerciseId === exercise.id),
 		);
 
@@ -324,7 +333,7 @@ function Today() {
 				: undefined,
 		});
 
-	const progress = summarise(program, sessions, sets, today);
+	const progress = summarise(program, phaseEvents, sessions, sets, today);
 
 	const exerciseName = (exerciseId: string) =>
 		exercises.find((exercise) => exercise.id === exerciseId)?.name ??
@@ -373,7 +382,7 @@ function Today() {
 		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
 			<header className="px-2 pt-7 pb-1">
 				<p className="eyebrow">
-					{formatDate(today)} · Fase {phase.id} {phase.name}
+					{formatDate(today)} · Fase {phase.order} {phase.name}
 				</p>
 				<h1 className="mt-1 text-[1.75rem] leading-tight font-bold tracking-tight">
 					{template?.name ?? dayPlan?.block ?? "Sin sesión"}
@@ -474,7 +483,7 @@ function Today() {
 										</h2>
 										<p className="tabular mt-1 text-[0.8125rem] text-muted">
 											{setsOf(current) ? `${setsOf(current)?.max} × ` : ""}
-											{formatTarget(current.target, phase.id)}
+											{formatTarget(current.target, slot)}
 										</p>
 									</div>
 									<button
@@ -489,7 +498,7 @@ function Today() {
 
 								<ExerciseLogger
 									exercise={current}
-									phase={phase.id}
+									slot={slot}
 									targetSets={setsOf(current)}
 									targetRir={phase.targetRir}
 									decision={decisionFor(current)}
@@ -612,7 +621,8 @@ function Today() {
 			{settingsFor ? (
 				<ExerciseSettings
 					exercise={settingsFor}
-					phase={phase.id}
+					phase={phase}
+					slot={slot}
 					sets={setsOf(settingsFor)}
 					onSave={(changes) => {
 						saveOverride(settingsFor.id, changes);

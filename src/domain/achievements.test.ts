@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PHASE_EVENTS } from "./__fixtures__/log";
 import { PROGRAM } from "./__fixtures__/program";
 import {
 	loadGains,
@@ -17,7 +18,7 @@ function session(id: string, date: string): SessionRecord {
 		id,
 		date,
 		templateId: "full_body_a",
-		phase: 1,
+		phase: "adaptacion",
 		completed: true,
 		notes: null,
 		startedAt: null,
@@ -195,7 +196,13 @@ describe("summarise", () => {
 
 	it("counts only this week's sessions for the weekly target", () => {
 		// 2026-08-12 is a Wednesday; its week starts Monday 2026-08-10.
-		const progress = summarise(PROGRAM, sessions, sets, "2026-08-12");
+		const progress = summarise(
+			PROGRAM,
+			PHASE_EVENTS,
+			sessions,
+			sets,
+			"2026-08-12",
+		);
 		expect(progress.sessionsThisWeek).toBe(2);
 		expect(progress.sessionsTarget).toBe(3);
 		expect(progress.totalSessions).toBe(3);
@@ -204,14 +211,21 @@ describe("summarise", () => {
 	it("does not count a session with nothing logged in it", () => {
 		const withEmpty = [...sessions, session("s4", "2026-08-11")];
 		expect(
-			summarise(PROGRAM, withEmpty, sets, "2026-08-12").totalSessions,
+			summarise(PROGRAM, PHASE_EVENTS, withEmpty, sets, "2026-08-12")
+				.totalSessions,
 		).toBe(3);
 	});
 
 	it("reports where you are in the program", () => {
-		const progress = summarise(PROGRAM, sessions, sets, "2026-08-12");
+		const progress = summarise(
+			PROGRAM,
+			PHASE_EVENTS,
+			sessions,
+			sets,
+			"2026-08-12",
+		);
 		expect(progress.week).toBe(1);
-		expect(progress.phaseId).toBe(1);
+		expect(progress.phaseId).toBe("adaptacion");
 		expect(progress.phaseName).toBe("Adaptación");
 		expect(progress.weeksToCheckpoint).toBe(18);
 		expect(progress.totalWeeks).toBe(19);

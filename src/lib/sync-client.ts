@@ -17,7 +17,9 @@
 
 import type { Collections } from "@/db/collections";
 import { applyRemote } from "@/db/synced";
-import { highWaterMark } from "@/domain/sync";
+import { highWaterMark, SYNC_SCHEMA_VERSION } from "@/domain/sync";
+import { program } from "@/lib/content";
+import { normalizeIncoming } from "@/lib/migrate-phase-ids";
 
 const ENDPOINT = "/api/sync";
 const MARK_KEY = "operacion-tesis:sync-mark";
@@ -110,8 +112,26 @@ export function createSyncClient(
 			const response = await fetch(ENDPOINT, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ since: mark, changes }),
+				body: JSON.stringify({
+					since: mark,
+					changes,
+					schemaVersion: SYNC_SCHEMA_VERSION,
+				}),
 			});
+
+			// An outdated client is turned away rather than allowed to write records
+			// this version cannot read. Losing sync for a day is an inconvenience;
+			// a log full of values a version does not understand is damage.
+			if (response.status === 409) {
+				const body = (await response.json().catch(() => ({}))) as {
+					error?: string;
+				};
+				if (body.error === "client-outdated") {
+					throw new Error(
+						"Actualiza este dispositivo para sincronizar: los datos del servidor son más nuevos.",
+					);
+				}
+			}
 
 			if (!response.ok) {
 				const reason = await response
@@ -134,10 +154,19 @@ export function createSyncClient(
 
 			for (const change of incoming) {
 				if (!COLLECTION_KEYS.includes(change.collection)) continue;
+
+				// Normalised on the way in. A device that has migrated can still be
+				// sent an old session by one that has not, and translating here means
+				// the half-named half-numbered state never exists rather than being
+				// cleaned up after the fact.
+				const [data] = normalizeIncoming(program, change.collection, [
+					change.data,
+				]).rows;
+
 				// Written through `raw` so the stamping proxy does not touch it: a
 				// re-stamped pull would look like a local edit and bounce back.
 				applyRemote(collections.raw[change.collection], change.id, {
-					...change.data,
+					...data,
 					updatedAt: change.updatedAt,
 					deletedAt: change.deletedAt,
 				});

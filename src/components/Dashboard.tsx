@@ -67,9 +67,7 @@ export function Dashboard({
 					/>
 				</div>
 
-				<p className="mt-3 text-[0.8125rem] text-muted">
-					Fase {progress.phaseId} · {progress.phaseName}
-				</p>
+				<p className="mt-3 text-[0.8125rem] text-muted">{progress.phaseName}</p>
 
 				<dl className="mt-5 grid grid-cols-3 gap-3">
 					<Tile

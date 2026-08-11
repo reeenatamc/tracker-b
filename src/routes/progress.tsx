@@ -37,6 +37,7 @@ function Progress() {
 		sessions,
 		sets,
 		ankleChecks,
+		phaseEvents,
 	} = useRecords();
 	const [editing, setEditing] = useState<ProgressCheck | "new" | null>(null);
 
@@ -58,7 +59,7 @@ function Progress() {
 
 			<Dashboard
 				program={program}
-				progress={summarise(program, sessions, sets, todayIso())}
+				progress={summarise(program, phaseEvents, sessions, sets, todayIso())}
 				checks={checks}
 				ankleChecks={ankleChecks}
 			/>

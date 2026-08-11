@@ -86,3 +86,52 @@ export function highWaterMark(
 		previous,
 	);
 }
+
+// ------------------------------------------------------- schema compatibility
+
+/**
+ * The shape of the data being exchanged. Bumped when a stored record changes in a
+ * way an older client cannot read — E2 turned `SessionRecord.phase` from a number
+ * into a string, so it went from 1 to 2.
+ */
+export const SYNC_SCHEMA_VERSION = 2;
+
+export type VersionVerdict =
+	| { ok: true }
+	/** The server holds data newer than this client knows how to read. */
+	| { ok: false; reason: "client-outdated"; required: number }
+	/** This client brings newer data; the server moves up to meet it. */
+	| { ok: false; reason: "server-outdated"; clientVersion: number };
+
+/**
+ * Whether a client may sync, in either direction.
+ *
+ * The tempting alternative was to assume an older client would cope with an
+ * unfamiliar value — that stored records happen not to be validated on the way in
+ * is true today, but it is an implementation detail rather than a promise, and
+ * leaning on it means writing data into a database that that version cannot read.
+ *
+ * A device that cannot sync for a few days is an inconvenience. A log full of
+ * records a version does not understand is damage. So an outdated client is turned
+ * away, in both directions, and told to update — and it keeps logging locally in
+ * the meantime, which this app has never needed the network for.
+ */
+export function checkSchemaVersion(
+	clientVersion: number,
+	serverVersion: number,
+): VersionVerdict {
+	if (clientVersion < serverVersion) {
+		return { ok: false, reason: "client-outdated", required: serverVersion };
+	}
+	if (clientVersion > serverVersion) {
+		return { ok: false, reason: "server-outdated", clientVersion };
+	}
+	return { ok: true };
+}
+
+/**
+ * A client that sends no version at all is a client from before versions existed.
+ */
+export function clientVersionOf(body: { schemaVersion?: unknown }): number {
+	return typeof body.schemaVersion === "number" ? body.schemaVersion : 1;
+}

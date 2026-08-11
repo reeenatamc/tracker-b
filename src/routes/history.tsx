@@ -15,7 +15,7 @@ import { PageHeader, TabBar } from "@/components/TabBar";
 import { useRecords } from "@/db/records";
 import { displayName } from "@/domain/exercise-ids";
 import { findExercise } from "@/domain/personalise";
-import { phaseById } from "@/domain/phases";
+import { phaseById, phaseOfSession } from "@/domain/phases";
 import { sessionById } from "@/domain/schedule";
 import type { Exercise, PhaseId, SetRecord } from "@/domain/schema";
 import { program } from "@/lib/content";
@@ -92,7 +92,9 @@ function History() {
 						<section key={session.id} className="card">
 							<div className="flex items-baseline justify-between">
 								<p className="eyebrow">{formatDate(session.date)}</p>
-								<p className="eyebrow">Fase {session.phase}</p>
+								<p className="eyebrow">
+									{phaseOfSession(program, session)?.name ?? session.phase}
+								</p>
 							</div>
 							<h2 className="mt-1 text-[0.9375rem]">
 								{templateName(session.templateId)}

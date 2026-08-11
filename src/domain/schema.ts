@@ -13,13 +13,29 @@ export const IsoDate = z
 	.string()
 	.regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD");
 
-export const PhaseId = z.union([
+/**
+ * A phase id. Open, and canonical: once it appears on a session or an event it is
+ * a key into the log, so it is never renamed, reused or deleted — the same rule
+ * the exercise ids live by, for the same reason.
+ *
+ * The visible name is free to change. That is `Phase.name`.
+ */
+export const PhaseId = z
+	.string()
+	.regex(
+		/^[a-z][a-z0-9_]*$/,
+		"un id de fase se escribe en minúsculas, sin acentos y sin guiones",
+	);
+export type PhaseId = z.infer<typeof PhaseId>;
+
+/** The numeric ids phases had before they were opened up. Migration only. */
+export const LegacyPhaseId = z.union([
 	z.literal(1),
 	z.literal(2),
 	z.literal(3),
 	z.literal(4),
 ]);
-export type PhaseId = z.infer<typeof PhaseId>;
+export type LegacyPhaseId = z.infer<typeof LegacyPhaseId>;
 
 /** A fixed count, an inclusive range ("2–3 series"), or not programmed at all. */
 export const SetCount = z.union([
@@ -110,12 +126,46 @@ export const SessionTemplate = z.object({
 });
 export type SessionTemplate = z.infer<typeof SessionTemplate>;
 
+/**
+ * What to do with a phase's planned start when the phase before it runs long.
+ *
+ * `rolling` moves with the training — most phases. `anchored` does not, because
+ * its date comes from outside: a trip, a deadline. If you run late, what gets
+ * squeezed is whatever sits before an anchored phase, never the anchor.
+ */
+export const SchedulePolicy = z.enum(["rolling", "anchored"]);
+export type SchedulePolicy = z.infer<typeof SchedulePolicy>;
+
+/** Something that should hold to enter or leave a phase. Prose in E2; E6 judges it. */
+export const Criterion = z.object({
+	id: z.string().min(1),
+	text: z.string(),
+	metric: z.string().nullable().default(null),
+	evidenceId: z.string().nullable().default(null),
+});
+export type Criterion = z.infer<typeof Criterion>;
+
 export const Phase = z.object({
 	id: PhaseId,
 	name: z.string(),
-	startDate: IsoDate,
-	/** Null on the final phase: it runs until the thesis defence. */
-	endDate: IsoDate.nullable(),
+	/** Intended order. Does NOT decide which phase you are in — events do. */
+	order: z.number().int().positive(),
+	/** A forecast, not a fact. May sit in the past without anything being wrong. */
+	plannedStart: IsoDate.nullable(),
+	plannedEnd: IsoDate.nullable(),
+	schedulePolicy: SchedulePolicy.default("rolling"),
+	entryCriteria: z.array(Criterion).default([]),
+	exitCriteria: z.array(Criterion).default([]),
+	/** The numeric id this phase carried before E2. Used once, by the migration. */
+	legacyId: LegacyPhaseId.nullable().default(null),
+	/**
+	 * Where anything this phase does not state comes from: which `setsByPhase`
+	 * column, which cardio prescription. It is what lets a new phase exist without
+	 * a code change, and it retires in E3 when prescription stops being per-phase.
+	 */
+	inheritsFrom: PhaseId.nullable().default(null),
+	/** No longer programmed, but still real: sessions stamped with it must resolve. */
+	retired: z.boolean().default(false),
 	goal: z.string(),
 	/** Working sets per exercise for this phase — v3 states one figure, not two. */
 	workingSets: SetCount.default(2),
@@ -128,6 +178,72 @@ export const Phase = z.object({
 	avoid: z.string().default(""),
 });
 export type Phase = z.infer<typeof Phase>;
+
+/**
+ * The phase log: what actually happened, as opposed to what was planned.
+ *
+ * Three shapes, as a discriminated union rather than one object with optional
+ * fields — so that a revocation cannot carry a destination. "I revoke X and also
+ * move to phase C" is a sentence with no meaning, and a permissive type would let
+ * somebody write it.
+ *
+ * Append-only, and not by convention: the collection itself refuses `update` and
+ * `delete` (see `db/synced.ts`). The only ways to change an event's effect are a
+ * `correction` or a `revocation`.
+ */
+export const PhaseTrigger = z.enum([
+	"planned",
+	"criteria-met",
+	"review",
+	"manual",
+	"safety",
+]);
+export type PhaseTrigger = z.infer<typeof PhaseTrigger>;
+
+const PhaseMove = {
+	/** Null only on the first: the start of the program. */
+	fromPhaseId: PhaseId.nullable(),
+	toPhaseId: PhaseId,
+	/** The day the new phase is in force from. Inclusive. */
+	occurredOn: IsoDate,
+	/** What the plan said. Null when nothing was planned. */
+	plannedFor: IsoDate.nullable().default(null),
+	trigger: PhaseTrigger,
+	reason: z.string().default(""),
+	reviewId: z.string().nullable().default(null),
+};
+
+export const PhaseEvent = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("transition"),
+		id: z.string().min(1),
+		...PhaseMove,
+		createdAt: z.number(),
+	}),
+	/** That transition was recorded wrong; this one replaces it whole. */
+	z.object({
+		kind: z.literal("correction"),
+		id: z.string().min(1),
+		supersedesId: z.string().min(1),
+		...PhaseMove,
+		createdAt: z.number(),
+	}),
+	/** That event did not happen. Puts nothing in its place. */
+	z.object({
+		kind: z.literal("revocation"),
+		id: z.string().min(1),
+		revokesId: z.string().min(1),
+		reason: z.string().default(""),
+		createdAt: z.number(),
+	}),
+]);
+export type PhaseEvent = z.infer<typeof PhaseEvent>;
+
+/** The two kinds that carry a destination. Revocations do not. */
+export type PhaseMoveEvent = Extract<
+	PhaseEvent,
+	{ kind: "transition" | "correction" }
+>;
 
 export const WeekDayPlan = z.object({
 	weekday: Weekday,

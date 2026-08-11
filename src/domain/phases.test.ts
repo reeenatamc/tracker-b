@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PHASE_EVENTS } from "./__fixtures__/log";
 import { PROGRAM } from "./__fixtures__/program";
 import {
 	exercisesForPhase,
@@ -11,26 +12,30 @@ import {
 
 describe("phaseForDate", () => {
 	it.each([
-		["2026-08-10", 1, "Adaptación"],
-		["2026-08-23", 1, "Adaptación"],
-		["2026-08-24", 2, "Construcción"],
-		["2026-10-04", 2, "Construcción"],
-		["2026-10-05", 3, "Recomposición"],
-		["2026-11-15", 3, "Recomposición"],
-		["2026-11-16", 4, "Operación Cuadritos"],
-		["2026-12-20", 4, "Operación Cuadritos"],
-	])("%s falls in phase %i", (date, id, name) => {
-		const phase = phaseForDate(PROGRAM, date);
+		["2026-08-10", "adaptacion", "Adaptación"],
+		["2026-08-23", "adaptacion", "Adaptación"],
+		["2026-08-24", "progresion", "Construcción"],
+		["2026-10-04", "progresion", "Construcción"],
+		["2026-10-05", "recomposicion", "Recomposición"],
+		["2026-11-15", "recomposicion", "Recomposición"],
+		["2026-11-16", "definicion_tesis", "Operación Cuadritos"],
+		["2026-12-20", "definicion_tesis", "Operación Cuadritos"],
+	])("%s falls in phase %s", (date, id, name) => {
+		const phase = phaseForDate(PROGRAM, PHASE_EVENTS, date);
 		expect(phase.id).toBe(id);
 		expect(phase.name).toBe(name);
 	});
 
 	it("reads the baseline session, two days before phase 1, as phase 1", () => {
-		expect(phaseForDate(PROGRAM, "2026-08-08").id).toBe(1);
+		expect(phaseForDate(PROGRAM, PHASE_EVENTS, "2026-08-08").id).toBe(
+			"adaptacion",
+		);
 	});
 
 	it("keeps the last phase open past the checkpoint", () => {
-		expect(phaseForDate(PROGRAM, "2027-03-01").id).toBe(4);
+		expect(phaseForDate(PROGRAM, PHASE_EVENTS, "2027-03-01").id).toBe(
+			"definicion_tesis",
+		);
 	});
 });
 
@@ -38,21 +43,36 @@ describe("targetSets", () => {
 	const [prensa, abduccion, stepDown] = PROGRAM.sessions[0].exercises;
 
 	it("gives a main lift 2 sets in phase 1 and 3 in phase 2", () => {
-		expect(targetSets(prensa, 1)).toEqual({ min: 2, max: 2 });
-		expect(targetSets(prensa, 2)).toEqual({ min: 3, max: 3 });
+		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[0])).toEqual({
+			min: 2,
+			max: 2,
+		});
+		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[1])).toEqual({
+			min: 3,
+			max: 3,
+		});
 	});
 
 	it("keeps an accessory at 2 sets in phase 2", () => {
-		expect(targetSets(abduccion, 2)).toEqual({ min: 2, max: 2 });
+		expect(targetSets(PROGRAM, abduccion, PROGRAM.phases[1])).toEqual({
+			min: 2,
+			max: 2,
+		});
 	});
 
 	it('reads a "2–3" phase-4 prescription as a range', () => {
-		expect(targetSets(prensa, 4)).toEqual({ min: 2, max: 3 });
+		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[3])).toEqual({
+			min: 2,
+			max: 3,
+		});
 	});
 
 	it("returns null for an exercise not yet introduced", () => {
-		expect(targetSets(stepDown, 1)).toBeNull();
-		expect(targetSets(stepDown, 2)).toEqual({ min: 2, max: 2 });
+		expect(targetSets(PROGRAM, stepDown, PROGRAM.phases[0])).toBeNull();
+		expect(targetSets(PROGRAM, stepDown, PROGRAM.phases[1])).toEqual({
+			min: 2,
+			max: 2,
+		});
 	});
 });
 
@@ -66,9 +86,9 @@ describe("resolveSetCount", () => {
 
 describe("targetRir", () => {
 	it("tightens as the program advances", () => {
-		expect(targetRir(PROGRAM, 1)).toEqual({ min: 2, max: 3 });
-		expect(targetRir(PROGRAM, 2)).toEqual({ min: 2, max: 2 });
-		expect(targetRir(PROGRAM, 3)).toEqual({ min: 1, max: 2 });
+		expect(targetRir(PROGRAM.phases[0])).toEqual({ min: 2, max: 3 });
+		expect(targetRir(PROGRAM.phases[1])).toEqual({ min: 2, max: 2 });
+		expect(targetRir(PROGRAM.phases[2])).toEqual({ min: 1, max: 2 });
 	});
 });
 
@@ -76,7 +96,7 @@ describe("exercisesForPhase", () => {
 	const exercises = PROGRAM.sessions[0].exercises;
 
 	it("omits exercises not yet introduced and keeps program order", () => {
-		const phase1 = exercisesForPhase(exercises, 1);
+		const phase1 = exercisesForPhase(PROGRAM, exercises, PROGRAM.phases[0]);
 		expect(phase1.map((exercise) => exercise.id)).toEqual([
 			"prensa",
 			"abduccion",
@@ -85,7 +105,7 @@ describe("exercisesForPhase", () => {
 	});
 
 	it("includes step-down from phase 2", () => {
-		const phase2 = exercisesForPhase(exercises, 2);
+		const phase2 = exercisesForPhase(PROGRAM, exercises, PROGRAM.phases[1]);
 		expect(phase2.map((exercise) => exercise.id)).toContain("step-down-bajo");
 	});
 });

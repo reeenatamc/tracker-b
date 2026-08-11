@@ -20,7 +20,11 @@ vi.mock("@/lib/photos", () => ({
 }));
 
 import type { Collections } from "@/db/collections";
+import { PROGRAM } from "@/domain/__fixtures__/program";
+import { phaseForDate } from "@/domain/phase-events";
+import type { PhaseEvent } from "@/domain/schema";
 import { exportBackup, importBackup } from "@/lib/backup";
+import { migratePhaseIds } from "@/lib/migrate-phase-ids";
 import { readPhotoUrl, savePhoto } from "@/lib/photos";
 
 /**
@@ -75,13 +79,16 @@ const KEYS = [
 	"customExercises",
 	"progressChecks",
 	"inspo",
+	"phaseEvents",
 ] as const;
 
 function makeCollections(seed: Partial<Record<string, Row[]>> = {}) {
 	const built = Object.fromEntries(
 		KEYS.map((key) => [key, makeCollection(seed[key] ?? [])]),
 	);
-	return built as unknown as Collections;
+	// `raw` is the same collections unwrapped — the migration writes through it so
+	// a correction does not look like a fresh local edit.
+	return { ...built, raw: built } as unknown as Collections;
 }
 
 const SESSION: Row = {
@@ -109,6 +116,19 @@ const SET: Row = {
 	rir: 2,
 	anklePain: null,
 	note: null,
+};
+
+const PHASE_EVENT: Row = {
+	id: "seed-phase-adaptacion",
+	kind: "transition",
+	fromPhaseId: null,
+	toPhaseId: "adaptacion",
+	occurredOn: "2026-08-10",
+	plannedFor: "2026-08-10",
+	trigger: "planned",
+	reason: "",
+	reviewId: null,
+	createdAt: 1,
 };
 
 /** Turns an exported blob back into the File the importer expects. */
@@ -141,7 +161,7 @@ describe("ida y vuelta", () => {
 		expect(filename).toBe("operacion-tesis-2026-08-11.json");
 	});
 
-	it("lleva las siete colecciones, no sólo las que se usan a diario", async () => {
+	it("lleva las ocho colecciones, no sólo las que se usan a diario", async () => {
 		const source = makeCollections({
 			sessions: [SESSION],
 			sets: [SET],
@@ -152,6 +172,9 @@ describe("ida y vuelta", () => {
 			inspo: [
 				{ id: "in-1", kind: "reference", date: "2026-08-10", photoId: null },
 			],
+			// The phase log has to travel too: restored without it, every date would
+			// fall back to the first phase and the history would quietly relabel.
+			phaseEvents: [PHASE_EVENT],
 		});
 
 		const { blob } = await exportBackup(source, "2026-08-11");
@@ -265,5 +288,83 @@ describe("archivos que no son un respaldo", () => {
 		await expect(importBackup(makeCollections(), future)).rejects.toThrow(
 			/versión más nueva/i,
 		);
+	});
+});
+
+/**
+ * The recovery that actually matters: a backup taken before E2, restored after.
+ *
+ * A backup is the one thing that survives a cleared browser, and the moment it
+ * stops being restorable across a migration it has quietly stopped being a
+ * backup. So this walks the whole path — import, migrate, seed, verify, export
+ * again — rather than checking that the file parses.
+ */
+describe("un respaldo de E1 se recupera en E2", () => {
+	/** Sessions as E1 wrote them: `phase` is a number. */
+	const E1_BACKUP = {
+		format: "operacion-tesis-backup",
+		version: 1,
+		exportedAt: "2026-08-20",
+		records: {
+			sessions: [
+				{ ...SESSION, id: "s1", date: "2026-08-10", phase: 1 },
+				{ ...SESSION, id: "s2", date: "2026-09-01", phase: 2 },
+				{ ...SESSION, id: "s3", date: "2026-12-01", phase: 4 },
+			],
+			sets: [SET],
+		},
+		photos: {},
+	};
+
+	it("conserva la fase de cada sesión y deja el historial entero", async () => {
+		const target = makeCollections();
+		await importBackup(target, asFile(new Blob([JSON.stringify(E1_BACKUP)])));
+
+		// Tal cual entra: todavía numérica, porque el respaldo es de antes.
+		expect(target.sessions.toArray.map((row) => row.phase)).toEqual([1, 2, 4]);
+
+		const report = migratePhaseIds(target, PROGRAM);
+
+		expect(report.sessionsMigrated).toBe(3);
+		expect(report.unmapped).toEqual([]);
+		expect(report.eventsSeeded).toBe(4);
+
+		// Cada sesión conserva su fase: 1 era adaptación y lo sigue siendo.
+		expect(target.sessions.toArray.map((row) => [row.id, row.phase])).toEqual([
+			["s1", "adaptacion"],
+			["s2", "progresion"],
+			["s3", "definicion_tesis"],
+		]);
+
+		// Y el historial sigue completo.
+		expect(target.sets.toArray).toHaveLength(1);
+	});
+
+	it("la fase derivada de cada fecha coincide con la que quedó guardada", async () => {
+		const target = makeCollections();
+		await importBackup(target, asFile(new Blob([JSON.stringify(E1_BACKUP)])));
+		migratePhaseIds(target, PROGRAM);
+
+		const events = target.phaseEvents.toArray as unknown as PhaseEvent[];
+		for (const row of target.sessions.toArray) {
+			expect(
+				phaseForDate(PROGRAM, events, row.date as string).id,
+				`sesión ${row.id}`,
+			).toBe(row.phase);
+		}
+	});
+
+	it("y vuelve a exportarse sin pérdidas", async () => {
+		const target = makeCollections();
+		await importBackup(target, asFile(new Blob([JSON.stringify(E1_BACKUP)])));
+		migratePhaseIds(target, PROGRAM);
+
+		const { blob } = await exportBackup(target, "2026-08-21");
+		const roundTripped = makeCollections();
+		await importBackup(roundTripped, asFile(blob));
+
+		expect(roundTripped.sessions.toArray).toEqual(target.sessions.toArray);
+		// El log de fases viaja con él: sin esto, restaurar perdería las transiciones.
+		expect(roundTripped.phaseEvents.toArray).toHaveLength(4);
 	});
 });

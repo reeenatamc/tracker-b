@@ -11,7 +11,8 @@
 import seedData from "@content/first-session.json";
 import { z } from "zod";
 import type { Collections } from "@/db/collections";
-import { IsoDate, LoadUnit, PhaseId } from "@/domain/schema";
+import { IsoDate, LoadUnit } from "@/domain/schema";
+import { program } from "@/lib/content";
 
 /**
  * The importer's own output shape, which is close to but not the same as the
@@ -21,7 +22,8 @@ import { IsoDate, LoadUnit, PhaseId } from "@/domain/schema";
 const SeedFile = z.object({
 	date: IsoDate,
 	type: z.string(),
-	phase: PhaseId,
+	/** The importer writes the spreadsheet's numeric phase; E2 names it below. */
+	phase: z.union([z.number(), z.string()]),
 	completed: z.boolean(),
 	sets: z.array(
 		z.object({
@@ -57,6 +59,19 @@ function parseRir(value: string | number | null): number | null {
  */
 const SEED_PREFIX = "seed-";
 
+/**
+ * The seed file predates named phases, and it is regenerated from the
+ * spreadsheet, which still counts them. Translating here rather than rewriting
+ * the file keeps the importer's job unchanged — and a seed that silently failed
+ * to parse would leave the first real session with no history to progress from,
+ * which is most of what makes this better than the spreadsheet on day one.
+ */
+function phaseIdOf(value: number | string): string {
+	if (typeof value === "string") return value;
+	const phase = program.phases.find((entry) => entry.legacyId === value);
+	return phase?.id ?? program.phases[0].id;
+}
+
 export function syncSeed(collections: Collections): void {
 	const seed = SeedFile.safeParse(seedData);
 	if (!seed.success || seed.data.sets.length === 0) return;
@@ -91,7 +106,7 @@ export function syncSeed(collections: Collections): void {
 			id: sessionId,
 			date: seed.data.date,
 			templateId: seed.data.type,
-			phase: seed.data.phase,
+			phase: phaseIdOf(seed.data.phase),
 			completed: seed.data.completed,
 			notes: "Sesión base importada del Excel.",
 			startedAt: null,

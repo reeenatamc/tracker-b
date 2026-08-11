@@ -21,11 +21,12 @@ import type {
 	CustomExercise,
 	ExerciseOverride,
 	InspoItem,
+	PhaseEvent,
 	ProgressCheck,
 	SessionRecord,
 	SetRecord,
 } from "@/domain/schema";
-import { syncable } from "./synced";
+import { appendOnly, syncable } from "./synced";
 
 const DATABASE_NAME = "operacion-tesis";
 
@@ -132,6 +133,18 @@ async function createCollections() {
 		}),
 	);
 
+	// The phase log. Append-only, and enforced rather than trusted: `appendOnly`
+	// below refuses update and delete, so the only way to change an event's effect
+	// is another event.
+	const phaseEvents = createCollection(
+		persistedCollectionOptions<PhaseEvent, string>({
+			id: "phase_events",
+			getKey: (event) => event.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
 	const raw = {
 		sessions,
 		sets,
@@ -140,6 +153,7 @@ async function createCollections() {
 		customExercises,
 		progressChecks,
 		inspo,
+		phaseEvents,
 	};
 
 	/**
@@ -159,6 +173,7 @@ async function createCollections() {
 		customExercises: syncable(customExercises),
 		progressChecks: syncable(progressChecks),
 		inspo: syncable(inspo),
+		phaseEvents: appendOnly(syncable(phaseEvents)),
 		raw,
 	};
 }

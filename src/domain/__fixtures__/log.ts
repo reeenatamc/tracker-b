@@ -13,7 +13,13 @@
  */
 
 import type { SafetyInput } from "../safety";
-import type { Exercise, Range, SessionRecord, SetRecord } from "../schema";
+import type {
+	Exercise,
+	PhaseEvent,
+	Range,
+	SessionRecord,
+	SetRecord,
+} from "../schema";
 import { makeExercise, makeSet } from "./program";
 
 /** One progression question, fully specified. */
@@ -261,7 +267,7 @@ export const SESSIONS: readonly SessionRecord[] = [
 	id: `session-${index + 1}`,
 	date,
 	templateId: "full_body_a",
-	phase: (date < "2026-08-24" ? 1 : 2) as 1 | 2,
+	phase: date < "2026-08-24" ? "adaptacion" : "progresion",
 	completed: true,
 	notes: null,
 	startedAt: null,
@@ -316,3 +322,26 @@ export const SETS: readonly SetRecord[] = SESSIONS.flatMap((session, week) => {
 		}),
 	);
 });
+
+/**
+ * The phase log the migration would seed for `PROGRAM`: one transition per phase,
+ * on its planned start. With these, the phase derived for any past date is the one
+ * the old date-range code returned.
+ */
+export const PHASE_EVENTS: readonly PhaseEvent[] = [
+	["adaptacion", null, "2026-08-10"],
+	["progresion", "adaptacion", "2026-08-24"],
+	["recomposicion", "progresion", "2026-10-05"],
+	["definicion_tesis", "recomposicion", "2026-11-16"],
+].map(([to, from, on]) => ({
+	kind: "transition" as const,
+	id: `seed-phase-${to}`,
+	fromPhaseId: from as string | null,
+	toPhaseId: to as string,
+	occurredOn: on as string,
+	plannedFor: on as string,
+	trigger: "planned" as const,
+	reason: "Sembrada desde el plan original en la migración a E2.",
+	reviewId: null,
+	createdAt: Date.parse(`${on}T12:00:00Z`),
+}));

@@ -266,7 +266,7 @@ describe("first time doing an exercise", () => {
 			exercise: prensa,
 			lastSets: [],
 			targetRir: PHASE_1_RIR,
-			targetSets: targetSets(prensa, 1),
+			targetSets: targetSets(PROGRAM, prensa, PROGRAM.phases[0]),
 		});
 		expect(decision).toEqual({ kind: "start", loadKg: 5, perSide: true });
 	});
@@ -279,7 +279,7 @@ describe("exercises that are not progressed by load", () => {
 			exercise: balance,
 			lastSets: [],
 			targetRir: PHASE_1_RIR,
-			targetSets: targetSets(balance, 1),
+			targetSets: targetSets(PROGRAM, balance, PROGRAM.phases[0]),
 		});
 		expect(decision).toEqual({ kind: "qualitative" });
 	});

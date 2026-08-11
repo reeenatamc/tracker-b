@@ -45,10 +45,12 @@ write("program.yaml", {
 		checkpointDate: "2026-05-15",
 		startWeightKg: null,
 	},
+	// Generic dates, and the planned ones specifically: a phase calendar is
+	// planning, which is the part of `content/` that stays private.
 	phases: program.phases.map((phase: Record<string, unknown>, index: number) => ({
 		...phase,
-		startDate: `2026-0${index + 1}-05`,
-		endDate: index === 3 ? null : `2026-0${index + 2}-01`,
+		plannedStart: `2026-0${index + 1}-05`,
+		plannedEnd: index === 3 ? null : `2026-0${index + 2}-01`,
 	})),
 	weekStructure: program.weekStructure,
 	sessions: program.sessions.map((session: Record<string, unknown>) => ({

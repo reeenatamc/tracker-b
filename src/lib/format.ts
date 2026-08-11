@@ -7,7 +7,7 @@
 
 import type { ProgressionDecision } from "@/domain/progression";
 import type { SafetySignal } from "@/domain/safety";
-import type { PhaseId, SetRecord, Target } from "@/domain/schema";
+import type { SetRecord, Target } from "@/domain/schema";
 
 const WEEKDAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 const MONTHS = [
@@ -49,8 +49,14 @@ function range(min: number, max: number): string {
 	return min === max ? String(min) : `${min}${RANGE_DASH}${max}`;
 }
 
-/** How a set is measured: "10–12", "8/lado", "30 s/lado", "8–10 min". */
-export function formatTarget(target: Target, phase: PhaseId): string {
+/**
+ * How a set is measured: "10–12", "8/lado", "30 s/lado", "8–10 min".
+ *
+ * Takes the prescription slot rather than the phase id, because `minutesByPhase`
+ * indexes a list by position. Callers get it from `slotOf(program, phase)` — the
+ * same bridge the rest of the prescription reads through until E3.
+ */
+export function formatTarget(target: Target, slot: number): string {
 	switch (target.kind) {
 		case "reps":
 			return range(target.min, target.max);
@@ -63,7 +69,7 @@ export function formatTarget(target: Target, phase: PhaseId): string {
 		case "minutes":
 			return `${range(target.min, target.max)} min`;
 		case "minutesByPhase": {
-			const forPhase = target.byPhase[phase - 1] ?? target.byPhase[0];
+			const forPhase = target.byPhase[slot - 1] ?? target.byPhase[0];
 			return `${range(forPhase.min, forPhase.max)} min`;
 		}
 		case "rounds":

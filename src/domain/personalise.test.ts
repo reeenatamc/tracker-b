@@ -15,7 +15,7 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 		id: "s1",
 		date: "2026-08-10",
 		templateId: template.id,
-		phase: 1,
+		phase: PROGRAM.phases[0].id,
 		completed: false,
 		notes: null,
 		startedAt: null,
@@ -83,8 +83,9 @@ describe("applyOverride", () => {
 
 describe("resolveSessionExercises", () => {
 	const base = {
+		program: PROGRAM,
 		template,
-		phase: 1 as const,
+		phase: PROGRAM.phases[0],
 		overrides: [],
 		customExercises: [],
 	};
@@ -171,19 +172,34 @@ describe("resolveSets", () => {
 	const prensa = template.exercises[0];
 
 	it("uses the phase prescription by default", () => {
-		expect(resolveSets(prensa, 1, undefined)).toEqual({ min: 2, max: 2 });
-		expect(resolveSets(prensa, 4, undefined)).toEqual({ min: 2, max: 3 });
+		expect(resolveSets(PROGRAM, prensa, PROGRAM.phases[0], undefined)).toEqual({
+			min: 2,
+			max: 2,
+		});
+		expect(resolveSets(PROGRAM, prensa, PROGRAM.phases[3], undefined)).toEqual({
+			min: 2,
+			max: 3,
+		});
 	});
 
 	it("lets you pin a set count yourself", () => {
-		expect(resolveSets(prensa, 1, makeOverride({ setsOverride: 4 }))).toEqual({
+		expect(
+			resolveSets(
+				PROGRAM,
+				prensa,
+				PROGRAM.phases[0],
+				makeOverride({ setsOverride: 4 }),
+			),
+		).toEqual({
 			min: 4,
 			max: 4,
 		});
 	});
 
 	it("is null for an exercise the phase does not program", () => {
-		expect(resolveSets(template.exercises[2], 1, undefined)).toBeNull();
+		expect(
+			resolveSets(PROGRAM, template.exercises[2], PROGRAM.phases[0], undefined),
+		).toBeNull();
 	});
 });
 
@@ -192,7 +208,12 @@ describe("skippedExercises", () => {
 		const session = makeSession({
 			skippedExerciseIds: ["prensa", "step-down-bajo"],
 		});
-		const list = skippedExercises(template, 1, session);
+		const list = skippedExercises(
+			PROGRAM,
+			template,
+			PROGRAM.phases[0],
+			session,
+		);
 		// step-down is not programmed in phase 1, so it is not offered back.
 		expect(list.map((e) => e.id)).toEqual(["prensa"]);
 	});

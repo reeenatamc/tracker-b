@@ -12,6 +12,10 @@
  * bundle, so it would be decoration rather than a control.
  */
 
+import {
+	checkSchemaVersion,
+	clientVersionOf,
+} from "../src/domain/sync";
 import { connect, type Db, json } from "./_db";
 
 type Change = {
@@ -22,7 +26,12 @@ type Change = {
 	data: Record<string, unknown>;
 };
 
-type SyncRequest = { since?: number; changes?: Change[] };
+type SyncRequest = {
+	since?: number;
+	changes?: Change[];
+	/** Absent means a client from before versions existed. */
+	schemaVersion?: number;
+};
 
 const COLLECTIONS = new Set([
 	"sessions",
@@ -32,6 +41,7 @@ const COLLECTIONS = new Set([
 	"customExercises",
 	"progressChecks",
 	"inspo",
+	"phaseEvents",
 ]);
 
 let ready: Promise<void> | null = null;
@@ -50,6 +60,13 @@ function ensureSchema(db: Db) {
 			)
 		`;
 		await db`create index if not exists records_updated_at_idx on records (updated_at)`;
+		// One row, holding the shape of the data this server is carrying.
+		await db`create table if not exists sync_meta (
+			id int primary key default 1,
+			schema_version int not null
+		)`;
+		await db`insert into sync_meta (id, schema_version) values (1, 1)
+			on conflict (id) do nothing`;
 	})();
 	return ready;
 }
@@ -60,6 +77,27 @@ export async function POST(request: Request): Promise<Response> {
 		await ensureSchema(db);
 
 		const body = (await request.json()) as SyncRequest;
+
+		/*
+		 * The version gate, before anything is read or written. A client that does
+		 * not understand the shape of the stored data must not exchange records
+		 * with it in either direction — reading it would show wrong phases, and
+		 * writing would put values back that this server's other client cannot
+		 * read.
+		 */
+		const [meta] = await db`select schema_version from sync_meta where id = 1`;
+		const serverVersion = Number(meta?.schema_version ?? 1);
+		const clientVersion = clientVersionOf(body);
+		const verdict = checkSchemaVersion(clientVersion, serverVersion);
+
+		if (!verdict.ok && verdict.reason === "client-outdated") {
+			return json({ error: "client-outdated", required: verdict.required }, 409);
+		}
+		if (!verdict.ok && verdict.reason === "server-outdated") {
+			// The client carries the newer shape; the server moves up to meet it.
+			await db`update sync_meta set schema_version = ${verdict.clientVersion} where id = 1`;
+		}
+
 		const since = Number.isFinite(body.since) ? Number(body.since) : 0;
 		const changes = (body.changes ?? []).filter(
 			(change) =>

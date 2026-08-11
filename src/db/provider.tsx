@@ -4,7 +4,9 @@
  */
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
+import { program } from "@/lib/content";
 import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
+import { migratePhaseIds } from "@/lib/migrate-phase-ids";
 import { requestPersistence } from "@/lib/persist";
 import { registerServiceWorker } from "@/lib/register-service-worker";
 import { syncSeed } from "@/lib/seed";
@@ -38,6 +40,14 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 				const migration = migrateExerciseIds(collections);
 				if (migration.setsMigrated > 0 || migration.unmapped.length > 0) {
 					console.info("Migración de ids de ejercicio:", migration);
+				}
+
+				// Names the phases stamped on stored sessions, and seeds the log with
+				// the transitions the plan implies. Idempotent, same as the above, and
+				// it runs before anything reads a phase so the two can never disagree.
+				const phases = migratePhaseIds(collections, program);
+				if (phases.sessionsMigrated > 0 || phases.eventsSeeded > 0) {
+					console.info("Migración de fases:", phases);
 				}
 				if (!cancelled) setStatus({ state: "ready", collections });
 			},

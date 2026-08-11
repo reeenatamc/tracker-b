@@ -14,7 +14,7 @@
 import { setsFor } from "./history";
 import { phaseForDate, weeksUntilCheckpoint } from "./phases";
 import { startOfWeek } from "./schedule";
-import type { Program, SessionRecord, SetRecord } from "./schema";
+import type { PhaseEvent, Program, SessionRecord, SetRecord } from "./schema";
 
 export type LoadGain = {
 	exerciseId: string;
@@ -29,7 +29,7 @@ export type Progress = {
 	week: number;
 	totalWeeks: number;
 	weeksToCheckpoint: number;
-	phaseId: 1 | 2 | 3 | 4;
+	phaseId: string;
 	phaseName: string;
 	sessionsThisWeek: number;
 	sessionsTarget: number;
@@ -42,11 +42,12 @@ const WEEKLY_STRENGTH_TARGET = 3;
 
 export function summarise(
 	program: Program,
+	events: readonly PhaseEvent[],
 	sessions: readonly SessionRecord[],
 	sets: readonly SetRecord[],
 	today: string,
 ): Progress {
-	const phase = phaseForDate(program, today);
+	const phase = phaseForDate(program, events, today);
 	const weekStart = startOfWeek(today);
 
 	const completed = sessions.filter((session) =>

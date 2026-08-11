@@ -14,12 +14,7 @@ import { useState } from "react";
 import { PrimaryButton, Sheet } from "@/components/Sheet";
 import { Stepper } from "@/components/Stepper";
 import { DEFAULT_INCREMENT_KG } from "@/domain/progression";
-import type {
-	Exercise,
-	ExerciseOverride,
-	PhaseId,
-	Range,
-} from "@/domain/schema";
+import type { Exercise, ExerciseOverride, Phase, Range } from "@/domain/schema";
 import { formatTarget } from "@/lib/format";
 
 export type OverrideChanges = Pick<
@@ -30,6 +25,7 @@ export type OverrideChanges = Pick<
 export function ExerciseSettings({
 	exercise,
 	phase,
+	slot,
 	sets,
 	onSave,
 	onSkip,
@@ -37,7 +33,9 @@ export function ExerciseSettings({
 	onClose,
 }: {
 	exercise: Exercise;
-	phase: PhaseId;
+	phase: Phase;
+	/** Which prescription column this phase reads. Bridge until E3. */
+	slot: number;
 	sets: Range | null;
 	onSave: (changes: OverrideChanges) => void;
 	onSkip: () => void;
@@ -65,8 +63,8 @@ export function ExerciseSettings({
 	return (
 		<Sheet title={exercise.name} onClose={onClose}>
 			<p className="text-[0.8125rem] text-muted">
-				Fase {phase} · {sets ? `${sets.max}×` : ""}
-				{formatTarget(exercise.target, phase)}
+				{phase.name} · {sets ? `${sets.max}×` : ""}
+				{formatTarget(exercise.target, slot)}
 				{exercise.progression ? ` · ${exercise.progression}` : ""}
 			</p>
 

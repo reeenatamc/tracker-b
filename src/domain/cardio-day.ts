@@ -17,6 +17,8 @@ import type {
 	AnkleExercise,
 	CardioPrescription,
 	Exercise,
+	Phase,
+	PhaseEvent,
 	Program,
 	Range,
 } from "./schema";
@@ -35,13 +37,16 @@ export function isCardioDay(date: string): boolean {
 	return CARDIO_WEEKDAYS.has(weekdayOf(date));
 }
 
-export function cardioFor(program: Program, date: string): CardioDay | null {
+export function cardioFor(
+	program: Program,
+	events: readonly PhaseEvent[],
+	date: string,
+): CardioDay | null {
 	const weekday = weekdayOf(date);
 	if (!CARDIO_WEEKDAYS.has(weekday)) return null;
 
-	const phase = phaseForDate(program, date);
-	const prescription =
-		program.cardio.find((entry) => entry.phase === phase.id) ?? null;
+	const phase = phaseForDate(program, events, date);
+	const prescription = cardioForPhase(program, phase);
 
 	const minutes =
 		weekday === "tuesday"
@@ -95,6 +100,31 @@ export type RehabStage = {
  * at six weeks but the ankle does not, and dropping to nothing would quietly
  * stop the one thing with a clinical reason to continue.
  */
+/**
+ * The cardio prescription for a phase, following `inheritsFrom` when the phase
+ * does not state one of its own. Same bridge as `slotOf`, and it retires with it.
+ */
+function cardioForPhase(
+	program: Program,
+	phase: Phase,
+): CardioPrescription | null {
+	const seen = new Set<string>();
+	let cursor: Phase | null = phase;
+
+	while (cursor) {
+		const found = program.cardio.find((entry) => entry.phase === cursor?.id);
+		if (found) return found;
+		if (seen.has(cursor.id)) break;
+		seen.add(cursor.id);
+		cursor = cursor.inheritsFrom
+			? (program.phases.find((entry) => entry.id === cursor?.inheritsFrom) ??
+				null)
+			: null;
+	}
+
+	return null;
+}
+
 export function rehabStageFor(
 	program: Program,
 	date: string,

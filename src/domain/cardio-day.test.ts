@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PHASE_EVENTS } from "./__fixtures__/log";
 import { PROGRAM } from "./__fixtures__/program";
 import {
 	cardioFor,
@@ -34,7 +35,7 @@ function rehab(
 
 const CARDIO: CardioPrescription[] = [
 	{
-		phase: 1,
+		phase: "adaptacion",
 		tuesday: { min: 25, max: 30 },
 		thursday: { min: 25, max: 30 },
 		saturday: { min: 20, max: 30 },
@@ -46,7 +47,7 @@ const CARDIO: CardioPrescription[] = [
 		reduceWhen: "Tobillo sensible",
 	},
 	{
-		phase: 2,
+		phase: "progresion",
 		tuesday: { min: 30, max: 35 },
 		thursday: { min: 30, max: 35 },
 		saturday: { min: 30, max: 40 },
@@ -91,32 +92,34 @@ describe("isCardioDay", () => {
 
 describe("cardioFor", () => {
 	it("gives the minutes for that weekday at the current phase", () => {
-		expect(cardioFor(program, "2026-08-11")?.minutes).toEqual({
+		expect(cardioFor(program, PHASE_EVENTS, "2026-08-11")?.minutes).toEqual({
 			min: 25,
 			max: 30,
 		});
 		// Phase 2 starts 24 Aug and asks for more.
-		expect(cardioFor(program, "2026-08-25")?.minutes).toEqual({
+		expect(cardioFor(program, PHASE_EVENTS, "2026-08-25")?.minutes).toEqual({
 			min: 30,
 			max: 35,
 		});
 	});
 
 	it("marks Saturday as optional, because the plan offers it rather than programs it", () => {
-		const saturday = cardioFor(program, "2026-08-15");
+		const saturday = cardioFor(program, PHASE_EVENTS, "2026-08-15");
 		expect(saturday?.optional).toBe(true);
 		expect(saturday?.minutes).toEqual({ min: 20, max: 30 });
 
-		expect(cardioFor(program, "2026-08-11")?.optional).toBe(false);
+		expect(cardioFor(program, PHASE_EVENTS, "2026-08-11")?.optional).toBe(
+			false,
+		);
 	});
 
 	it("is null on a strength day", () => {
-		expect(cardioFor(program, "2026-08-10")).toBeNull();
+		expect(cardioFor(program, PHASE_EVENTS, "2026-08-10")).toBeNull();
 	});
 
 	it("survives a phase with no cardio row", () => {
 		const thin = { ...program, cardio: [] };
-		expect(cardioFor(thin, "2026-08-11")).toEqual({
+		expect(cardioFor(thin, PHASE_EVENTS, "2026-08-11")).toEqual({
 			minutes: null,
 			prescription: null,
 			optional: false,

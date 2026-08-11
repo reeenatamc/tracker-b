@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { changedSince, highWaterMark, mergeRecords, visible } from "./sync";
+import {
+	changedSince,
+	checkSchemaVersion,
+	clientVersionOf,
+	highWaterMark,
+	mergeRecords,
+	visible,
+} from "./sync";
 
 type Row = {
 	id: string;
@@ -141,3 +148,43 @@ describe("visible", () => {
 function sorted(rows: readonly Row[]): Row[] {
 	return [...rows].sort((a, b) => a.id.localeCompare(b.id));
 }
+
+describe("compatibilidad de esquema", () => {
+	it("deja pasar a un cliente al día", () => {
+		expect(checkSchemaVersion(2, 2)).toEqual({ ok: true });
+	});
+
+	it("deja pasar a un cliente por delante, y el servidor sube", () => {
+		expect(checkSchemaVersion(2, 1)).toEqual({
+			ok: false,
+			reason: "server-outdated",
+			clientVersion: 2,
+		});
+	});
+
+	/**
+	 * El caso que motiva todo esto: un cliente de E1 contra datos de E2. Escribir
+	 * ahí valores que esa versión no sabe leer daña el historial; no sincronizar
+	 * unos días sólo molesta.
+	 */
+	it("rechaza a un cliente que no sabe leer lo que hay guardado", () => {
+		expect(checkSchemaVersion(1, 2)).toEqual({
+			ok: false,
+			reason: "client-outdated",
+			required: 2,
+		});
+	});
+
+	it("un cliente sin versión es un cliente anterior a las versiones", () => {
+		expect(clientVersionOf({})).toBe(1);
+		expect(clientVersionOf({ schemaVersion: 2 })).toBe(2);
+		expect(clientVersionOf({ schemaVersion: "dos" })).toBe(1);
+	});
+
+	it("un cliente de E1 contra un servidor de E2 no pasa en ninguna dirección", () => {
+		const verdict = checkSchemaVersion(clientVersionOf({}), 2);
+		expect(verdict.ok).toBe(false);
+		// Ni sube ni baja: el endpoint responde antes de leer o escribir nada.
+		expect(verdict).toMatchObject({ reason: "client-outdated" });
+	});
+});

@@ -34,6 +34,7 @@ const COLLECTION_KEYS = [
 	"customExercises",
 	"progressChecks",
 	"inspo",
+	"phaseEvents",
 ] as const;
 
 export type BackupSummary = {

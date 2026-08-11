@@ -15,7 +15,7 @@ import {
 	type ProgressionDecision,
 	repRangeOf,
 } from "@/domain/progression";
-import type { Exercise, PhaseId, Range, SetRecord } from "@/domain/schema";
+import type { Exercise, Range, SetRecord } from "@/domain/schema";
 import {
 	describeDecision,
 	formatDayMonth,
@@ -30,7 +30,8 @@ export type NewSet = Omit<SetRecord, "id" | "sessionId">;
 
 type ExerciseLoggerProps = {
 	exercise: Exercise;
-	phase: PhaseId;
+	/** Which prescription column this phase reads. Bridge until E3. */
+	slot: number;
 	targetSets: Range | null;
 	targetRir: Range;
 	decision: ProgressionDecision;
@@ -50,7 +51,7 @@ const TONE_TEXT = {
 
 export function ExerciseLogger({
 	exercise,
-	phase,
+	slot,
 	targetSets,
 	targetRir,
 	decision,
@@ -242,7 +243,7 @@ export function ExerciseLogger({
 					</ul>
 					<p className="mt-2 text-[0.6875rem] text-faint">
 						{working.length} de {targetSets ? targetSets.max : "—"} series de
-						trabajo · {formatTarget(exercise.target, phase)}
+						trabajo · {formatTarget(exercise.target, slot)}
 						{exercise.load.startKg !== null
 							? ` · inicio ${formatLoad(exercise.load.startKg, exercise.load.perSide)}`
 							: ""}

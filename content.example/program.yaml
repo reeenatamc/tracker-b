@@ -7,10 +7,17 @@ meta:
   checkpointDate: 2026-05-15
   startWeightKg: null
 phases:
-  - id: 1
+  - id: adaptacion
     name: Adaptación
-    startDate: 2026-01-05
-    endDate: 2026-02-01
+    order: 1
+    plannedStart: 2026-01-05
+    plannedEnd: 2026-02-01
+    schedulePolicy: rolling
+    entryCriteria: []
+    exitCriteria: []
+    legacyId: 1
+    inheritsFrom: null
+    retired: false
     goal: Aprender técnica y encontrar cargas
     workingSets: 2
     targetRir:
@@ -23,10 +30,17 @@ phases:
     ankleStage: 3×/sem ~20 min
     progresses: Reps y técnica
     avoid: Fallo / HIIT / saltos
-  - id: 2
+  - id: progresion
     name: Progresión
-    startDate: 2026-02-05
-    endDate: 2026-03-01
+    order: 2
+    plannedStart: 2026-02-05
+    plannedEnd: 2026-03-01
+    schedulePolicy: rolling
+    entryCriteria: []
+    exitCriteria: []
+    legacyId: 2
+    inheritsFrom: null
+    retired: false
     goal: Ganar fuerza y mantener volumen moderado
     workingSets: 2
     targetRir:
@@ -39,10 +53,17 @@ phases:
     ankleStage: 3×/sem ~20–25 min
     progresses: Carga mediante doble progresión
     avoid: Añadir series a todo
-  - id: 3
+  - id: recomposicion
     name: Recomposición
-    startDate: 2026-03-05
-    endDate: 2026-04-01
+    order: 3
+    plannedStart: 2026-03-05
+    plannedEnd: 2026-04-01
+    schedulePolicy: rolling
+    entryCriteria: []
+    exitCriteria: []
+    legacyId: 3
+    inheritsFrom: null
+    retired: false
     goal: Conservar/crear músculo mientras baja grasa
     workingSets:
       - 2
@@ -57,10 +78,17 @@ phases:
     ankleStage: 3×/sem o mantenimiento
     progresses: Carga + cardio
     avoid: Volumen culturista
-  - id: 4
+  - id: definicion_tesis
     name: Definición/tesis
-    startDate: 2026-04-05
-    endDate: null
+    order: 4
+    plannedStart: 2026-04-05
+    plannedEnd: null
+    schedulePolicy: rolling
+    entryCriteria: []
+    exitCriteria: []
+    legacyId: 4
+    inheritsFrom: null
+    retired: false
     goal: Mantener músculo y llegar fresca
     workingSets: 2
     targetRir:
@@ -507,7 +535,7 @@ sessions:
           - kind: note
             text: Remo máquina
 cardio:
-  - phase: 1
+  - phase: adaptacion
     tuesday:
       min: 25
       max: 30
@@ -525,7 +553,7 @@ cardio:
     progression: +5 min antes que más intensidad
     avoid: Correr/HIIT/saltos
     reduceWhen: Tobillo sensible o fatiga alta
-  - phase: 2
+  - phase: progresion
     tuesday:
       min: 30
       max: 35
@@ -543,7 +571,7 @@ cardio:
     progression: Gradual
     avoid: HIIT frecuente
     reduceWhen: Rendimiento de fuerza cae
-  - phase: 3
+  - phase: recomposicion
     tuesday:
       min: 35
       max: 40
@@ -561,7 +589,7 @@ cardio:
     progression: Mantener/moderar
     avoid: Impacto si tobillo no está listo
     reduceWhen: Hambre/fatiga excesiva
-  - phase: 4
+  - phase: definicion_tesis
     tuesday:
       min: 40
       max: 45

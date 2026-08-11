@@ -6,11 +6,13 @@
  * fields you actually edited; everything else falls through to the program.
  */
 
+import { slotOf } from "./phases";
 import type {
 	CustomExercise,
 	Exercise,
 	ExerciseOverride,
-	PhaseId,
+	Phase,
+	Program,
 	Range,
 	SessionRecord,
 	SessionTemplate,
@@ -85,8 +87,9 @@ export function customToExercise(
 }
 
 export type ResolveInput = {
+	program: Program;
 	template: SessionTemplate;
-	phase: PhaseId;
+	phase: Phase;
 	overrides: readonly ExerciseOverride[];
 	customExercises: readonly CustomExercise[];
 	session: SessionRecord | null;
@@ -97,6 +100,7 @@ export type ResolveInput = {
  * minus what you skipped, plus what you added, with your overrides applied.
  */
 export function resolveSessionExercises({
+	program,
 	template,
 	phase,
 	overrides,
@@ -108,7 +112,7 @@ export function resolveSessionExercises({
 	const extras = new Set(session?.extraExerciseIds ?? []);
 
 	const programmed = template.exercises
-		.filter((exercise) => setsFor(exercise, phase) !== null)
+		.filter((exercise) => setsFor(program, exercise, phase) !== null)
 		.filter((exercise) => !skipped.has(exercise.id))
 		.map((exercise) => applyOverride(exercise, byExerciseId.get(exercise.id)));
 
@@ -125,32 +129,40 @@ export function resolveSessionExercises({
  * a "2–3" prescription keeps both ends.
  */
 export function resolveSets(
+	program: Program,
 	exercise: Exercise,
-	phase: PhaseId,
+	phase: Phase,
 	override: ExerciseOverride | undefined,
 ): Range | null {
 	if (override?.setsOverride != null) {
 		return { min: override.setsOverride, max: override.setsOverride };
 	}
-	const count = setsFor(exercise, phase);
+	const count = setsFor(program, exercise, phase);
 	if (count === null) return null;
 	if (typeof count === "number") return { min: count, max: count };
 	return { min: count[0], max: count[1] };
 }
 
-function setsFor(exercise: Exercise, phase: PhaseId) {
-	return exercise.setsByPhase[phase];
+/**
+ * The prescription is still indexed by the numeric phase id, so the slot is
+ * resolved from the phase's own data rather than rekeying the content. Bridge
+ * until E3 — see `slotOf`.
+ */
+function setsFor(program: Program, exercise: Exercise, phase: Phase) {
+	return exercise.setsByPhase[slotOf(program, phase)];
 }
 
 /** Exercises programmed for the phase that you skipped — offered to put back. */
 export function skippedExercises(
+	program: Program,
 	template: SessionTemplate,
-	phase: PhaseId,
+	phase: Phase,
 	session: SessionRecord | null,
 ): Exercise[] {
 	const skipped = new Set(session?.skippedExerciseIds ?? []);
 	return template.exercises.filter(
-		(exercise) => skipped.has(exercise.id) && setsFor(exercise, phase) !== null,
+		(exercise) =>
+			skipped.has(exercise.id) && setsFor(program, exercise, phase) !== null,
 	);
 }
 

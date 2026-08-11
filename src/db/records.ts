@@ -13,6 +13,7 @@ import type {
 	CustomExercise,
 	ExerciseOverride,
 	InspoItem,
+	PhaseEvent,
 	ProgressCheck,
 	SessionRecord,
 	SetRecord,
@@ -56,6 +57,9 @@ export function useRecords() {
 	const { data: inspo = [] } = useLiveQuery((q) =>
 		q.from({ i: collections.inspo }),
 	);
+	const { data: phaseEvents = [] } = useLiveQuery((q) =>
+		q.from({ p: collections.phaseEvents }),
+	);
 
 	return {
 		collections,
@@ -66,5 +70,6 @@ export function useRecords() {
 		customExercises: alive(customExercises) as CustomExercise[],
 		progressChecks: alive(progressChecks) as ProgressCheck[],
 		inspo: alive(inspo) as InspoItem[],
+		phaseEvents: alive(phaseEvents) as PhaseEvent[],
 	};
 }
