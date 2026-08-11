@@ -51,15 +51,24 @@ de caracterización de E0 siguen pasando con sus quince decisiones intactas.
 
 ---
 
-## 1. `PrescriptionBaseline`
+## 1. `PrescriptionEntry` — la identidad longitudinal del hueco
 
-Lo que el programa dijo al empezar. Se siembra una vez desde el contenido y **no se
-reescribe nunca** — ni al reimportar el Excel, que escribe el contenido y no la base.
+Un ejercicio de una sesión no es un ejercicio: es un **hueco** que hoy lo ocupa un
+ejercicio. El tercer hueco del Full Body A puede pasar de prensa a hack, y el historial de
+«qué hubo en ese hueco» tiene que sobrevivir a ese cambio — que es exactamente el mismo
+argumento por el que los ejercicios dejaron de identificarse por su nombre en E1.
+
+Por eso la identidad **no** es `${templateId}:${exerciseId}`. El ejercicio es un campo del
+hueco, no su nombre.
 
 ```ts
-export type PrescriptionBaseline = {
-  id: string                        // `${templateId}:${exerciseId}`, determinista
+/** Opaco y estable. Nunca se deriva de lo que hay dentro. */
+export type PrescriptionEntryId = string
+
+export type PrescriptionEntry = {
+  id: PrescriptionEntryId
   templateId: string
+  /** Quién ocupa el hueco. Cambiable con un ajuste; no es identidad. */
   exerciseId: CanonicalId
   order: number
 
@@ -73,379 +82,549 @@ export type PrescriptionBaseline = {
   progression: string
   cues: string[]
   allowedSubstitutions: SubstitutionRef[]
+}
 
-  /** De qué versión del contenido salió. Para saber qué se sembró y cuándo. */
+/** El estado de partida de cada hueco. Se siembra una vez y no se reescribe. */
+export type PrescriptionBaseline = PrescriptionEntry & {
   seededFrom: string
   seededAt: number
 }
 ```
 
-Una fila por par plantilla-ejercicio: **26**, no 104. Lo que hoy varía por fase
-—`setsByPhase`— no vive aquí.
+Los ids se asignan una vez en la migración con la forma `slot_<plantilla>_<nn>` y se
+congelan en `__fixtures__/prescription-entry-ids.ts`, con la misma prueba de sólo-crecer que
+protege los ids de fase. El número es una posición inicial, no un orden vigente: reordenar
+cambia `order`, nunca el id.
 
 ### Por qué la variación por fase no está en la base
 
 Porque no es la base: es lo primero que el plan decidió cambiar. Se expresa como un ajuste
-con `origin: "program"`, que es exactamente lo que dice tu observación original — la app no
-debe creer que «la fase 3 son 3 series», debe saber que **el plan de partida dijo** que en
-fase 3 fueran 3 series, y quién lo dijo.
-
-Efecto secundario que sólo es posible gracias a E2: un ajuste con alcance de fase entra
-cuando entras en la fase **de verdad**, no cuando el calendario decía que ibas a entrar. Si
-te retrasas dos semanas, su prescripción se retrasa contigo.
+con `origin: "program"`, que es lo que impide que la app «crea» que una fase son N series
+— sabe que **el plan de partida dijo** que lo fueran, y desde cuándo.
 
 ## 2. `PlanAdjustment`
 
+Una unión discriminada, no un `field` con `value: unknown`. Cada forma de cambiar el plan
+es una forma distinta, y cada campo lleva su tipo.
+
 ```ts
+/** Cambiar un campo. La relación campo↔tipo la conserva el discriminante. */
+export type FieldChange =
+  | { field: "sets";                 value: SetCount }
+  | { field: "target";               value: Target }
+  | { field: "load";                 value: Load }
+  | { field: "rir";                  value: Range | null }
+  | { field: "restSeconds";          value: Range | null }
+  | { field: "trainingRole";         value: TrainingRole }
+  | { field: "cues";                 value: string[] }
+  | { field: "allowedSubstitutions"; value: SubstitutionRef[] }
+
 export type AdjustmentOrigin =
-  | "program"   // venía escrito en el plan de partida
-  | "review"    // lo decidiste en un checkpoint viendo tus datos
-  | "coach"     // lo sugirió el motor y lo aceptaste          ← sin emisor hasta E6
-  | "manual"    // lo cambiaste en el momento, en el gimnasio
-  | "safety"    // forzado por dolor, hinchazón o inestabilidad
+  | "program" | "review" | "coach" | "manual" | "safety"
 
-export type AdjustmentScope =
-  /** Desde una fecha, para siempre. */
-  | { kind: "from_date"; effectiveFrom: IsoDate }
-  /** Mientras estés en esa fase, entres cuando entres. */
-  | { kind: "in_phase"; phaseId: string }
-
-export type AdjustmentTarget =
-  | { kind: "exercise"; templateId: string; exerciseId: CanonicalId }
-  | { kind: "template"; templateId: string }
-  | { kind: "program" }
-
-export type PlanAdjustment = {
+/** Lo común a todo ajuste. La temporalidad vive aquí. */
+type AdjustmentBase = {
   id: string
-  scope: AdjustmentScope
-  target: AdjustmentTarget
 
-  /** Qué campo de la prescripción cambia, y a qué. */
-  field: "sets" | "target" | "load" | "rir" | "restSeconds" | "cues"
-       | "allowedSubstitutions" | "trainingRole"
-  value: unknown
+  /**
+   * Desde qué fecha aplica. Obligatoria en todos, sin excepción — un ajuste es un
+   * estado que dura, y un estado sin fecha de inicio no se puede resolver.
+   */
+  effectiveOn: IsoDate
+  /** Restricción adicional: sólo mientras estés en esa fase. Ver §3.2. */
+  onlyInPhase: string | null
 
   origin: AdjustmentOrigin
-  /** Por qué. Obligatorio y no vacío: un ajuste sin motivo es un número sin dueño. */
+  /** No vacío. Un ajuste sin motivo es un número sin dueño. */
   reason: string
   evidenceIds: string[]
 
-  /** Sustituye a otro por completo. */
-  supersedesId: string | null
-  /** Lo anula sin poner nada en su lugar. */
-  revokesId: string | null
-
+  /** Cuándo se registró. Es el eje de tiempo de transacción. Ver §3. */
   createdAt: number
 }
+
+export type PlanAdjustment = AdjustmentBase &
+  (
+    | { kind: "set_field"; entryId: PrescriptionEntryId; change: FieldChange }
+    /** El hueco pasa a ocuparlo otro ejercicio. El hueco sigue siendo el mismo. */
+    | {
+        kind: "replace_exercise"
+        entryId: PrescriptionEntryId
+        exerciseId: CanonicalId
+      }
+    /** Un hueco nuevo, con su estado inicial completo. */
+    | { kind: "add_entry"; entry: PrescriptionEntry }
+    /** El hueco deja de programarse. No se borra: deja de resolver. */
+    | { kind: "remove_entry"; entryId: PrescriptionEntryId }
+    /**
+     * Aquel ajuste deja de aplicar **a partir de `effectiveOn`**. No lo borra de
+     * las fechas en las que sí estuvo vigente. Ver §3.
+     */
+    | { kind: "revoke"; revokesId: string }
+  )
 ```
 
-Append-only, con la misma envoltura que `phaseEvents`: la colección rechaza `update` y
-`delete`. Corregir es un ajuste nuevo con `supersedesId`; deshacer, uno con `revokesId`.
+Corregir es revocar y volver a poner: un `revoke` con la fecha desde la que el anterior
+deja de valer, y un ajuste nuevo. Dos filas en vez de un `supersedesId`, porque **la
+corrección también tiene fecha de efecto** y meterla en el mismo evento invitaba a
+olvidarla.
 
-### 2.1 `effectiveFrom` y la diferencia con las transiciones de fase
+Append-only, con la misma envoltura que `phaseEvents` y las mismas escrituras contadas por
+el tracker de T-001.
 
-Un evento de fase es un **punto** —cambiaste ese día o no—, y por eso anularlo era total.
-Un ajuste es un **estado que dura**, así que aquí `effectiveFrom` sí significa algo por sí
-solo: «desde el 5 de octubre, tres series». Anularlo también:
+## 3. Temporalidad: dos ejes
 
-- `supersedesId` — el ajuste sustituido desaparece de la resolución por completo.
-- `revokesId` — igual, pero sin sustituto.
+Aquí estaba el error de la primera versión. Reutilizar la semántica de `liveEvents` de las
+transiciones de fase habría hecho que revocar hoy un ajuste lo borrara de octubre, cuando
+en octubre **sí estuvo vigente**. Un evento de fase es un punto y anularlo puede ser total;
+un ajuste es un estado que dura, y anularlo sólo puede mirar hacia delante.
 
-La cadena se resuelve **con la misma regla de E2**, que ya está escrita y probada: un
-evento está vivo si ningún evento vivo lo referencia. Revocar la corrección más reciente
-restaura la anterior. Se reutiliza `liveEvents` en vez de escribirla otra vez.
+Así que hay dos ejes, y una consulta cita los dos:
 
-### 2.2 Precedencia
-
-Dos ajustes que tocan el mismo campo de la misma prescripción se ordenan así, y gana el
-último:
-
-| # | Criterio | Por qué |
+| Eje | Campo | Pregunta que responde |
 |---|---|---|
-| 1 | `origin`: `program` < `review` = `coach` = `manual` < `safety` | Lo que el plan traía escrito cede ante lo que decidiste mirando datos; y todo cede ante una señal de alarma. |
-| 2 | Alcance: `program` < `template` < `exercise` | Lo específico gana a lo general. |
-| 3 | Fecha de efecto, ascendente | Lo más reciente manda. |
-| 4 | `createdAt`, luego `id` | Determinista entre dispositivos, igual que en E2. |
+| **Tiempo de validez** | `effectiveOn` | ¿Qué prescripción regía **el día X**? |
+| **Tiempo de transacción** | `createdAt` | ¿Qué sabíamos **cuando lo miramos**? |
 
-**`safety` arriba del todo, y no se cae solo.** Una señal de alarma no deja de aplicar
-porque después escribas un ajuste manual con fecha posterior: para quitarla hay que
-revocarla explícitamente. Eso es deliberado — la regla que ya vive en `safety.ts` dice que
-el dolor manda sobre la progresión, y sería raro que el plan pudiera saltársela por orden
-de llegada.
+### 3.1 Definición
 
-## 3. `SessionPlanSnapshot`
+> Un ajuste `A` está **en vigor** en `(effectiveOn = d, knownAt = k)` si y sólo si:
+>
+> 1. `A.createdAt <= k` — ya existía cuando miramos;
+> 2. `A.effectiveOn <= d` — ya había entrado en vigor ese día;
+> 3. si `A.onlyInPhase` no es nulo, la fase resuelta para `d` es esa;
+> 4. **no** existe una revocación `R` con `R.revokesId === A.id`,
+>    `R.createdAt <= k` **y** `R.effectiveOn <= d`.
+
+La condición 4 es la que arregla el error: una revocación tiene su propia fecha de efecto,
+así que retira el ajuste **desde ahí hacia delante** y lo deja intacto antes.
+
+### 3.2 `onlyInPhase` no es retroactivo
+
+Un ajuste con alcance de fase creado a mitad de esa fase aplica desde su `effectiveOn`, no
+desde que la fase empezó. Las dos condiciones se cumplen a la vez: hay que estar en la fase
+**y** haber pasado la fecha de efecto.
+
+Es lo que permite decir «a partir del jueves, tres series mientras siga en recomposición»
+sin reescribir el lunes.
+
+### 3.3 Un ejemplo completo
+
+Una entrada, campo `sets`, base 2.
+
+| # | Evento | `effectiveOn` | `createdAt` |
+|---|---|---|---|
+| A1 | `set_field sets = 3` | 5 oct | 5 oct |
+| R1 | `revoke A1` | 1 nov | 1 nov |
+| A2 | `set_field sets = 2` | 1 nov | 1 nov |
+| R2 | `revoke A1` | **20 oct** | **1 dic** |
+
+Resolución en varias consultas:
+
+| `effectiveOn` | `knownAt` | Series | Por qué |
+|---|---|---|---|
+| 1 oct | hoy | **2** | A1 aún no había entrado en vigor |
+| 10 oct | hoy | **3** | A1 vigente; R1 no ha llegado; R2 no ha llegado |
+| 10 oct | 15 oct | **3** | Sólo existía A1 |
+| **25 oct** | **30 nov** | **3** | R2 aún no se había escrito |
+| **25 oct** | **hoy** | **2** | R2 existe y su efecto empieza el 20 oct |
+| 15 nov | hoy | **2** | A2 vigente |
+
+Las dos filas resaltadas son el punto: **la misma fecha da respuestas distintas según
+cuándo preguntes**, y las dos son correctas. Una corrección retroactiva escrita en
+diciembre cambia lo que hoy creemos del 25 de octubre, y **no** cambia lo que creíamos en
+noviembre — que es lo que hace reproducible una versión marcada entonces.
+
+## 4. Resolución
 
 ```ts
-export type ResolvedPrescription = {
-  exerciseId: CanonicalId
-  order: number
-  sets: SetCount
-  target: Target
-  load: Load
-  rir: Range | null
-  restSeconds: Range | null
-  trainingRole: TrainingRole
-  goal: string
-  progression: string
-  cues: string[]
-  allowedSubstitutions: SubstitutionRef[]
+export type AsOf = {
+  /** La fecha cuya prescripción se consulta. */
+  effectiveOn: IsoDate
+  /** Qué se sabía en ese instante. Por defecto, ahora. */
+  knownAt?: number
 }
 
+export function resolvePrescription(
+  baseline: readonly PrescriptionBaseline[],
+  adjustments: readonly PlanAdjustment[],
+  phaseAt: (date: IsoDate, knownAt?: number) => Phase,
+  templateId: string,
+  asOf: AsOf,
+): PrescriptionEntry[]
+```
+
+1. Partir de los huecos base de esa plantilla.
+2. Filtrar los ajustes en vigor por §3.1.
+3. Ordenar por precedencia (§5).
+4. Plegar: `add_entry` añade, `remove_entry` retira, `replace_exercise` cambia el ocupante,
+   `set_field` escribe su campo.
+
+`phaseAt` se recibe como función, no se importa: **la fase también es bitemporal**. Una
+corrección de `PhaseEvent` escrita en diciembre tampoco puede mover lo que una versión de
+octubre resolvía, así que `phaseForDate` gana un `knownAt` opcional que filtra los eventos
+por `createdAt`. Es el único cambio que E3 hace en el código de E2.
+
+Pura, sin E/S. Como todo lo que decide algo aquí.
+
+## 5. Precedencia
+
+Cuando dos ajustes en vigor tocan el mismo campo del mismo hueco, gana el último por:
+
+| # | Criterio |
+|---|---|
+| 1 | `origin`: `program` < `review` = `coach` = `manual` < `safety` |
+| 2 | `effectiveOn`, ascendente |
+| 3 | `createdAt`, luego `id` — determinista entre dispositivos |
+
+**`safety` arriba, y no se cae solo.** No deja de aplicar porque escribas después un ajuste
+manual: para quitarla hay que revocarla. La regla de `safety.ts` dice que el dolor manda
+sobre la progresión, y sería raro que el plan pudiera saltársela por orden de llegada.
+
+## 6. `SessionPlanSnapshot`
+
+```ts
 export type SessionPlanSnapshot = {
   id: string
   sessionId: string
   takenAt: number
-  /** La fase con la que se selló la sesión. */
   phaseId: string
   /** Valores resueltos, no referencias. Aquí está G3. */
-  exercises: ResolvedPrescription[]
+  entries: PrescriptionEntry[]
+
   /**
-   * Qué ajustes estaban vigentes. Sólo para poder explicar «¿por qué tres series
-   * aquel día?» — la instantánea se renderiza sin consultarlos.
+   * Falso: se congeló al empezar la sesión. Hecho observado, inmutable, y el
+   * rollback no lo toca.
+   *
+   * Cierto: se dedujo después para una sesión anterior a E3. Artefacto derivado —
+   * se puede regenerar, y el rollback puede borrarlo sin perder nada ocurrido.
    */
+  reconstructed: boolean
+  /**
+   * Sólo en las reconstruidas.
+   * `complete` — todo lo que la afectaba tenía fecha fiable y se pudo situar.
+   * `partial`  — algo no se pudo fechar y quedó fuera.
+   */
+  reconstructionConfidence: "complete" | "partial" | null
+  /** Qué no se pudo situar, para que «parcial» diga en qué. */
+  reconstructionGaps: string[]
+
+  /** Qué ajustes regían. Sólo para explicar; no hace falta para renderizar. */
   adjustmentIds: string[]
 }
 ```
 
-Append-only. Puede haber **más de una por sesión**: si a mitad decides adoptar un cambio de
-plan, se toma otra y la primera se queda. La sesión usa la más reciente; «qué tenías
-prescrito al empezar» sigue siendo respondible, que es lo que importa.
+### 6.1 Reconstruir sin inventar
 
-## 4. Resolución del plan para una fecha
+Las sesiones anteriores a E3 no congelaron nada. Se les deduce una instantánea resolviendo
+el plan a su fecha — pero **sólo con lo que se puede demostrar que existía entonces**.
 
-```ts
-export function resolvePrescription(
-  baseline: readonly PrescriptionBaseline[],
-  adjustments: readonly PlanAdjustment[],
-  phase: Phase,
-  date: IsoDate,
-  templateId: string,
-): ResolvedPrescription[]
+El caso que obliga a la regla es `ExerciseOverride`. Sus filas llevan `updatedAt` desde que
+existe la sincronización; **las escritas antes no llevan ninguno**.
+
+| Situación del override | Qué se hace | Confianza |
+|---|---|---|
+| `updatedAt` fiable, anterior a la sesión | Se incorpora | sigue `complete` |
+| `updatedAt` fiable, posterior a la sesión | Se deja fuera: no existía | sigue `complete` |
+| **Sin `updatedAt`** | **Se deja fuera**, anotado en `reconstructionGaps` | pasa a `partial` |
+
+No se incorpora nada que no se pueda fechar. Meterlo «porque probablemente ya estaba» sería
+justo lo que E3 existe para impedir: una prescripción histórica inventada con la misma
+pinta que una real. Una instantánea `partial` dice qué había y admite qué no pudo situar;
+una que se inventa el override es peor que no tenerla.
+
+### 6.2 Varias por sesión
+
+Puede haber más de una. Si a mitad adoptas un cambio de plan se toma otra y la primera se
+queda: la sesión usa la más reciente, y «qué tenías prescrito al empezar» sigue siendo
+respondible.
+
+## 7. Empezar una sesión sin agujeros
+
+G3 depende de que **ninguna sesión exista sin instantánea**. No hay transacción entre
+colecciones, así que el orden y la recuperación son la garantía.
+
+### 7.1 El orden
+
+```
+1. generar sessionId
+2. resolver y persistir la instantánea      ← se espera al disco
+3. persistir la sesión, con snapshotId      ← se espera al disco
+4. sólo entonces la sesión acepta series
 ```
 
-1. Partir de la base de esa plantilla.
-2. Descartar los ajustes muertos (§2.1).
-3. Quedarse con los aplicables: `from_date` con `effectiveFrom <= date`, o `in_phase` cuya
-   fase coincida con la resuelta para esa fecha.
-4. Ordenar por precedencia (§2.2).
-5. Plegar: cada ajuste escribe su campo.
+La instantánea va **primero** a propósito. Si el paso 3 falla queda una instantánea
+huérfana —basura recuperable— en vez de una sesión sin plan, que sería una violación de G3
+irreparable: nadie sabría qué se prescribió aquel día.
 
-Pura, sin E/S, sin React. Como todo lo que decide algo en este proyecto.
+Ambos pasos esperan al disco con `persisted()` de T-001. Una sesión no está empezada hasta
+que su instantánea está en OPFS.
 
-## 5. Sesión empezada, sesión futura
+### 7.2 Recuperación, idempotente y al arrancar
 
-| Situación | Qué se lee |
+| Situación | Qué se hace |
 |---|---|
-| **Sesión con instantánea** (empezada o terminada) | Su instantánea. Nunca se re-resuelve. |
-| **Sesión de hoy sin empezar** | Resolución en vivo. Todavía no es un hecho. |
-| **Sesión futura** | Resolución en vivo con la fase **proyectada** de E2. Es una previsión. |
+| Instantánea sin sesión | Huérfana del paso 3. Se descarta. |
+| Sesión con `snapshotId` que no resuelve | No debería ocurrir. Se reporta y se marca para reconstrucción. |
+| Sesión sin `snapshotId`, con series | Anterior a E3. Se reconstruye (§6.1). |
+| Sesión sin `snapshotId`, sin series | Nunca llegó a empezar. Se descarta. |
 
-**Si el plan cambia con una sesión ya empezada:** no pasa nada. La sesión sigue con su
-instantánea. La app puede decir «el plan cambió desde que empezaste» y ofrecer tomar una
-nueva — acción explícita, nunca automática. Es la misma forma que el reestampado de fase en
-E2, y por la misma razón.
+### 7.3 Adoptar un plan nuevo a mitad
 
-Igual que en E2, hay una consulta para verlo:
+Mismo orden: **persistir la instantánea nueva y esperar**, y sólo entonces apuntar la sesión
+a ella. Si falla, la sesión sigue con la anterior — que es lo correcto, porque la anterior
+es lo que estabas siguiendo.
 
-```ts
-export function sessionsWithOutdatedPlan(...): Array<{
-  sessionId: string
-  differences: Array<{ exerciseId: string; field: string }>
-}>
-```
+## 8. Desviarse no es cambiar el plan
 
-## 6. Versionado y diff
+Registrar 22,5 kg donde el plan decía 20 escribe **un `PerformedSet` y nada más**.
 
-Como se aprobó: **una versión es una etiqueta sobre una fecha, no una copia del plan.**
+No es una precaución, es una distinción de fondo: lo que hiciste y lo que está prescrito son
+dos cosas, y confundirlas convertiría cada sesión improvisada en una reescritura silenciosa
+del programa. Acabarías con un plan que nadie decidió, hecho de acumular desviaciones.
+
+Un ajuste sólo nace de una acción explícita —«aplicar al plan»— que pide su motivo, porque
+`reason` no puede ir vacío.
+
+## 9. Versionado bitemporal
+
+Una versión es una etiqueta sobre **dos** coordenadas, no una:
 
 ```ts
 export type ProgramVersion = {
   id: string
   label: string      // "v3"
+  /** La fecha cuya prescripción nombra. */
   cutAt: IsoDate
+  /** Qué se sabía al marcarla. Congelado aquí para que sea reproducible. */
+  knownAt: number
   reason: string
   createdAt: number
 }
 
 export function diffVersions(a: ProgramVersion, b: ProgramVersion) {
-  const before = resolveWholePlan(a.cutAt)
-  const after  = resolveWholePlan(b.cutAt)
+  const before = resolveWholePlan({ effectiveOn: a.cutAt, knownAt: a.knownAt })
+  const after  = resolveWholePlan({ effectiveOn: b.cutAt, knownAt: b.knownAt })
   return {
-    added:   exercisesIn(after).filter(notIn(before)),
-    removed: exercisesIn(before).filter(notIn(after)),
-    changed: fieldsThatDiffer(before, after),
-    volume:  { before: weeklySets(before), after: weeklySets(after) },
-    why:     adjustmentsBetween(a.cutAt, b.cutAt),   // ya llevan motivo y origen
+    added:    entriesIn(after).filter(notIn(before)),
+    removed:  entriesIn(before).filter(notIn(after)),
+    replaced: entriesWhoseExerciseChanged(before, after),
+    changed:  fieldsThatDiffer(before, after),
+    volume:   { before: weeklySets(before), after: weeklySets(after) },
+    why:      adjustmentsBetween(a, b),
   }
 }
 ```
 
+**`knownAt` es lo que hace reproducible una versión.** Sin él, una corrección retroactiva
+escrita en diciembre cambiaría en silencio lo que v3 —marcada en octubre— dice del plan de
+octubre. Con él, v3 sigue significando lo que significaba cuando la marcaste, y la
+corrección aparece donde debe: en la diferencia con v4.
+
+El `knownAt` alcanza también a las fases: `resolveWholePlan` se lo pasa a `phaseForDate`,
+que filtra los `PhaseEvent` por `createdAt`. Una corrección de fase escrita en diciembre
+tampoco mueve una versión de octubre.
+
+`added` / `removed` / `replaced` son representables porque los ajustes son una unión con
+`add_entry`, `remove_entry` y `replace_exercise` — no un `field`/`value` que sólo sabe
+tocar campos de lo que ya existe.
+
 El diff **se calcula, no se guarda**: un derivado almacenado es un derivado que un día
 contradice a los datos.
 
-## 7. Migración del plan actual
+## 10. Migración
 
-Cuatro pasos, y el tercero es el que lleva la carga conceptual.
+Seis pasos.
 
-1. **Sembrar la base.** Una fila por par plantilla-ejercicio desde el contenido compuesto
-   de E1. Ids deterministas, así que re-sembrar reconcilia.
-2. **Convertir `setsByPhase` en ajustes `origin: "program"`.** Para cada ejercicio y cada
-   fase cuyo número de series difiera del de la fase de menor orden, un ajuste
-   `{ kind: "in_phase", phaseId }` con `field: "sets"` y
+1. **Asignar ids de hueco.** Uno por par plantilla-ejercicio del contenido de E1, con la
+   forma `slot_<plantilla>_<nn>`, congelados en el fixture.
+2. **Sembrar la base.** Un `PrescriptionBaseline` por hueco. Ids deterministas: re-sembrar
+   reconcilia.
+3. **Convertir `setsByPhase` en ajustes `origin: "program"`.** Para cada hueco y cada fase
+   cuyas series difieran de la fase de menor orden: un `set_field` con
+   `onlyInPhase: <fase>`, `effectiveOn` = el `plannedStart` de esa fase, y
    `reason: "Variación de series que el programa traía escrita para esta fase."`
-3. **Retirar `slotOf()`.** El puente de E2 muere aquí, que era su fecha de caducidad.
-   `setsByPhase` deja de leerse; la prescripción sale de base + ajustes.
-4. **Sembrar instantáneas retroactivas.** Las sesiones ya registradas no tienen ninguna. Se
-   les crea una con la prescripción **resuelta a su propia fecha**, marcada
-   `takenAt: 0` y `reconstructed: true` — porque no es lo que se congeló aquel día, es la
-   mejor reconstrucción posible, y decirlo importa más que aparentar exactitud.
+4. **Migrar `ExerciseOverride`.** Cada fila pasa a un ajuste `origin: "manual"`. El
+   `effectiveOn` sale de su `updatedAt` cuando lo tiene; cuando no, del inicio del programa
+   — **y eso se anota**, porque es una suposición y las suposiciones se marcan.
+5. **Retirar `slotOf()`.** El puente de E2 muere aquí, que era su fecha de caducidad.
+6. **Reconstruir instantáneas** para las sesiones existentes, por §6.1.
 
-Después del paso 2, `resolvePrescription` en cualquier fecha pasada devuelve exactamente lo
-que devolvía `slotOf` + `setsByPhase`. **Se comprueba día a día**, igual que en E2.
+Tras el paso 3, resolver en cualquier fecha pasada devuelve exactamente lo que devolvía
+`slotOf` + `setsByPhase`. **Se comprueba día a día**, como en E2.
 
-## 8. Rollback
+## 11. Rollback
 
 | Capa | Cómo se revierte |
 |---|---|
-| Código | `git checkout t001` — el último estado bueno anterior a E3. |
-| Base y ajustes | `scripts/rollback-prescription.ts`: vacía base, ajustes y versiones. `setsByPhase` sigue en el contenido intacto, así que `slotOf` vuelve a funcionar. |
-| Instantáneas | **No se borran.** Son hechos, no derivados. Sobreviven al rollback y vuelven a servir si E3 se reintenta. |
+| Código | `git checkout t001`, el último estado bueno anterior a E3. |
+| Base, ajustes y versiones | `scripts/rollback-prescription.ts` los vacía. `setsByPhase` sigue intacto en el contenido, así que `slotOf` vuelve a funcionar. |
+| Instantáneas **reconstruidas** | Se borran. Son derivados: regenerables, no ocurrieron. |
+| Instantáneas **reales** | **No se tocan.** Son hechos observados y sobreviven al rollback. |
 | Respaldo | El archivo previo a migrar. Lo único que cubre lo imprevisto. |
 
-**Lo que el rollback se niega a hacer:** si existe algún ajuste con `origin` distinto de
-`program` —es decir, una decisión tuya y no una conversión mecánica— el script para y los
-lista. Revertir borraría decisiones que nadie más tiene escritas.
+**El script se niega** si existe algún ajuste con `origin` distinto de `program` que no
+provenga de la migración de `ExerciseOverride` — es decir, una decisión tuya. Revertir
+borraría algo que nadie más tiene escrito. Los lista y para.
 
-## 9. Pruebas
+## 12. Pruebas
+
+**Temporalidad — el corazón de E3**
+1. El ejemplo completo de §3.3, sus seis consultas, una a una.
+2. Revocar hoy no cambia una fecha anterior a la fecha de efecto de la revocación.
+3. Una revocación retroactiva sí cambia esa fecha — y no cambia lo que se veía antes de
+   escribirla.
+4. `onlyInPhase` creado a mitad de fase no aplica al principio de esa fase.
+5. `onlyInPhase` sigue la fase **real** de E2: entrar tarde retrasa su efecto.
+6. Orden determinista: el mismo conjunto barajado resuelve idéntico.
+
+**Bitemporalidad de versiones**
+7. Una corrección escrita después de marcar v3 no cambia lo que v3 resuelve.
+8. Lo mismo para una corrección de `PhaseEvent`.
+9. El diff entre v3 y v4 sí la muestra.
+
+**Cambios estructurales**
+10. `add_entry`, `remove_entry`, `replace_exercise` y `set_field`, cada uno resuelto.
+11. Un hueco que cambia de ejercicio conserva su id y su historial.
+12. El diff reporta `added` / `removed` / `replaced` / `changed` por separado.
+
+**G3**
+13. Congelar, cambiar el plan, releer: la sesión no se mueve.
+14. Revocar el ajuste vigente al congelar: la sesión sigue igual.
+15. Vaciar el registro de ajustes: la instantánea sigue renderizando.
+16. Sesión empezada y sesión futura, mismo cambio: la primera no cambia, la segunda sí.
+
+**Instantáneas y arranque**
+17. Reconstrucción sin `updatedAt` → `partial`, y el override **no** se incorpora.
+18. Reconstrucción con `updatedAt` anterior → `complete`, override incorporado.
+19. Instantánea huérfana → se descarta al arrancar.
+20. Fallo al persistir la sesión tras la instantánea → no queda sesión sin plan.
+21. Adoptar a mitad: si falla la persistencia, sigue mandando la anterior.
+22. Recuperación idempotente: correrla dos veces no cambia nada.
+
+**Desviación**
+23. Estructural: ningún camino desde el registro de series llega a los ajustes.
+24. De comportamiento: registrar una serie desviada deja los ajustes intactos.
 
 **Migración**
-1. Equivalencia exhaustiva día a día contra `slotOf` + `setsByPhase`, del inicio del
-   programa a dos años. Sin muestreo.
-2. Idempotencia: sembrar dos veces no duplica.
-3. Ida y vuelta: migrar y revertir devuelve los valores originales.
-4. Instantáneas reconstruidas: cada sesión histórica obtiene una, marcada como tal.
+25. Equivalencia exhaustiva día a día contra `slotOf` + `setsByPhase`.
+26. Idempotencia e ida y vuelta.
+27. `ExerciseOverride` sin `updatedAt` se migra con la suposición anotada.
 
-**G3 — la garantía**
-5. Congelar, cambiar el plan, releer: la sesión no se mueve.
-6. Revocar el ajuste que estaba vigente al congelar: la sesión **sigue igual**.
-7. Borrar el ajuste del registro entero: la instantánea sigue renderizando (autocontenida).
-8. Una sesión empezada y otra futura, mismo cambio de plan: la primera no cambia, la
-   segunda sí.
-9. Varias instantáneas en una sesión: la más reciente manda, la primera sigue consultable.
+**Sin motor**
+28. `progression.ts` sin cambios; caracterización de E0 intacta.
+29. Estructural: no existen `Rationale`, `Suggestion` ni `analyseTrend`.
 
-**Resolución y precedencia**
-10. Los cuatro criterios de §2.2, uno a uno.
-11. `safety` gana a un `manual` posterior.
-12. Quitar un `safety` requiere revocarlo explícitamente.
-13. Alcance: `exercise` gana a `template`, `template` a `program`.
-14. Cadenas supersede/revoke, reutilizando los casos ya probados en E2.
-15. Orden determinista: el mismo conjunto barajado resuelve idéntico.
-16. `in_phase` sigue a la fase real, no a la planificada — entrar tarde retrasa su efecto.
+**Durabilidad**
+30. Las colecciones nuevas están en respaldo, sync y la guarda de escrituras críticas.
 
-**Versionado**
-17. Diff entre dos fechas: añadidos, quitados, cambiados, volumen.
-18. El diff no se guarda: recalcular da lo mismo.
+## 13. Invariantes
 
-**No-motor**
-19. `progression.ts` sin cambios de comportamiento; caracterización de E0 intacta.
-20. Búsqueda estructural: no existen `Rationale`, `Suggestion` ni `analyseTrend`.
+**Temporales**
+1. Todo ajuste tiene `effectiveOn`.
+2. Una revocación sólo mira hacia delante desde su `effectiveOn`.
+3. Toda consulta cita `(effectiveOn, knownAt)`; `knownAt` por defecto es ahora.
+4. Un ajuste creado después de `knownAt` no influye en esa consulta.
+5. `onlyInPhase` nunca es retroactivo.
 
-**Durabilidad** — porque E3 añade tres colecciones
-21. Las tres nuevas están en el respaldo y en la lista de sincronización.
-22. La guarda de escrituras críticas cubre las nuevas colecciones.
+**De identidad**
+6. El id de un hueco no se deriva de su ocupante y no cambia nunca.
+7. Cambiar el ejercicio de un hueco conserva su id.
+8. Los ids de hueco sólo crecen.
 
-## 10. Invariantes
+**De inmutabilidad**
+9. Una sesión con instantánea no re-resuelve.
+10. La instantánea es autocontenida.
+11. Una instantánea real nunca se borra ni se regenera.
+12. Una reconstruida siempre va marcada, con su confianza.
+13. Ajustes, instantáneas y versiones sólo crecen.
+14. La base no se reescribe.
 
-1. Una sesión con instantánea nunca re-resuelve su prescripción.
-2. La instantánea es autocontenida: se renderiza sin base ni ajustes.
-3. Ajustes e instantáneas sólo crecen: la colección rechaza `update` y `delete`.
-4. La base no se reescribe: reimportar el Excel no la toca.
-5. Todo ajuste tiene `reason` no vacío.
-6. Un ajuste está vivo si ningún ajuste vivo lo referencia.
-7. La precedencia es total y determinista: mismo conjunto, mismo resultado.
-8. `safety` sólo se retira revocándolo.
-9. Un `in_phase` apunta a una fase que existe.
-10. Toda fecha resuelve a exactamente una prescripción por ejercicio.
-11. Ninguna prescripción histórica cambia sin un evento explícito posterior.
-12. El diff se calcula, nunca se almacena.
-13. E3 no emite sugerencias.
+**De resolución**
+15. La precedencia es total y determinista.
+16. `safety` sólo se retira revocándolo.
+17. Toda fecha resuelve a exactamente una prescripción por hueco.
+18. El diff se calcula, nunca se almacena.
 
-## 11. Archivos
+**De alcance**
+19. Registrar una serie no crea nunca un ajuste.
+20. Ninguna sesión existe sin instantánea.
+21. E3 no emite sugerencias.
+
+## 14. Archivos
 
 **Dominio**
 
 | Archivo | Qué |
 |---|---|
-| `src/domain/prescription.ts` | **nuevo** · `resolvePrescription`, precedencia, pliegue |
-| `src/domain/adjustments.ts` | **nuevo** · vivos/muertos y orden, reutilizando `liveEvents` |
+| `src/domain/prescription.ts` | **nuevo** · `resolvePrescription`, pliegue, precedencia |
+| `src/domain/adjustments.ts` | **nuevo** · vigencia bitemporal, orden |
 | `src/domain/versions.ts` | **nuevo** · `diffVersions`, `resolveWholePlan` |
-| `src/domain/snapshot.ts` | **nuevo** · congelar y leer |
-| `src/domain/schema.ts` | `PrescriptionBaseline`, `PlanAdjustment`, `SessionPlanSnapshot`, `ProgramVersion` |
+| `src/domain/snapshot.ts` | **nuevo** · congelar, leer, reconstruir |
+| `src/domain/schema.ts` | las cuatro entidades, con `FieldChange` como unión discriminada |
+| `src/domain/phase-events.ts` | `phaseForDate` acepta `knownAt` — único cambio a E2 |
 | `src/domain/phases.ts` | **retirar `slotOf`** |
-| `src/domain/personalise.ts` | `resolveSessionExercises` pasa a leer la prescripción resuelta |
-| pruebas | `prescription.test.ts`, `adjustments.test.ts`, `versions.test.ts`, `snapshot.test.ts` |
+| `src/domain/personalise.ts` | leer la prescripción resuelta |
+| `__fixtures__/prescription-entry-ids.ts` | **nuevo** · ids congelados |
+| pruebas | `prescription`, `adjustments`, `versions`, `snapshot` |
 
 **Persistencia**
 
 | Archivo | Qué |
 |---|---|
-| `src/db/collections.ts` | tres colecciones nuevas, dos append-only, todas `durable` |
+| `src/db/collections.ts` | cuatro colecciones nuevas, append-only y `durable` |
 | `src/db/records.ts` | exponerlas |
-| `src/lib/migrate-prescription.ts` | **nuevo** · los cuatro pasos de §7 |
+| `src/lib/migrate-prescription.ts` | **nuevo** · los seis pasos de §10 |
+| `src/lib/recover-snapshots.ts` | **nuevo** · §7.2 |
 | `src/lib/backup.ts` · `api/sync.ts` | añadirlas |
 | `scripts/rollback-prescription.ts` | **nuevo** |
 
 **Interfaz**
 
-`routes/index.tsx` (congelar al empezar, leer de la instantánea), `history.tsx` (leer de la
-instantánea), y una pantalla de plan mínima para ver ajustes y versiones. `ExerciseSettings`
-pasa a escribir `PlanAdjustment` en vez de `ExerciseOverride`.
+`routes/index.tsx` (congelar al empezar con el orden de §7.1, leer de la instantánea),
+`history.tsx` (leer de la instantánea), pantalla mínima de plan para ajustes y versiones.
+`ExerciseSettings` escribe `PlanAdjustment` en vez de `ExerciseOverride`.
 
-**Retirada**
-
-`ExerciseOverride` queda subsumido por `PlanAdjustment`. Se migran sus filas a ajustes
-`origin: "manual"` con `effectiveFrom` = inicio del programa —igual que en E1— y la
-colección se deja de escribir.
-
-## 12. Criterios de aceptación
+## 15. Criterios de aceptación
 
 | # | Criterio | Cómo se comprueba |
 |---|---|---|
-| 1 | **G3**: ninguna sesión con instantánea cambia de prescripción | Pruebas 5–9 |
-| 2 | **G3**: la instantánea se renderiza sin base ni ajustes | Prueba 7 |
-| 3 | **G4**: sin motor | Pruebas 19–20 |
-| 4 | Equivalencia exhaustiva con `slotOf` día a día | Prueba 1 |
-| 5 | Migración idempotente y reversible | Pruebas 2–3 |
-| 6 | Rollback se niega ante decisiones no mecánicas | Prueba dedicada |
-| 7 | Las tres colecciones viajan en respaldo y sync | Prueba 21 |
-| 8 | La guarda de durabilidad las cubre | Prueba 22 |
-| 9 | `slotOf` eliminado | `git grep slotOf` vacío |
-| 10 | Caracterización de E0 intacta | `git diff` |
-| 11 | Los cinco comandos en verde | — |
-| 12 | Smoke test en origen aislado | Sesión completa |
-| 13 | Respaldo real previo | Tuyo |
+| 1 | **G3**: una sesión con instantánea no cambia | Pruebas 13–16 |
+| 2 | **G3**: ninguna sesión existe sin instantánea | Pruebas 19–22 |
+| 3 | **G4**: sin motor | Pruebas 28–29 |
+| 4 | Revocar no reescribe el pasado | Pruebas 2–3 |
+| 5 | Una versión marcada es reproducible | Pruebas 7–8 |
+| 6 | El id de un hueco sobrevive al cambio de ejercicio | Prueba 11 |
+| 7 | Los cuatro cambios estructurales se representan | Pruebas 10, 12 |
+| 8 | Ninguna reconstrucción inventa un override | Pruebas 17–18 |
+| 9 | Registrar una serie no toca el plan | Pruebas 23–24 |
+| 10 | Equivalencia exhaustiva con `slotOf` | Prueba 25 |
+| 11 | Rollback conserva las instantáneas reales | Prueba dedicada |
+| 12 | `slotOf` eliminado | `git grep slotOf` vacío |
+| 13 | Caracterización de E0 intacta | `git diff` |
+| 14 | Los cinco comandos en verde | — |
+| 15 | Smoke test en origen aislado | Sesión completa |
+| 16 | Respaldo real previo | Tuyo |
 
 ---
 
 ## Riesgos
 
-1. **Es la etapa que más superficie toca.** Tres colecciones, la retirada de `slotOf`, y el
-   ejecutor leyendo de otra fuente. Más que E1 y E2 juntas.
-2. **Las instantáneas retroactivas son una reconstrucción, no un recuerdo.** Van marcadas,
-   pero conviene tenerlo presente: para las sesiones anteriores a E3, «lo que tenías
-   prescrito» es lo mejor que se puede deducir, no lo que se congeló.
-3. **La precedencia es donde se esconden las sorpresas.** Cuatro criterios y cinco orígenes
-   dan muchas combinaciones; de ahí que §2.2 tenga una prueba por criterio.
-4. **`ExerciseOverride` se retira con datos dentro.** Misma clase de migración que E2, con
-   la misma exigencia de ida y vuelta.
+1. **La bitemporalidad es fácil de implementar mal.** Dos ejes, cinco orígenes y tres
+   criterios de precedencia dan muchas combinaciones; de ahí que §12 empiece por las seis
+   consultas del ejemplo antes que por nada más.
+2. **Es la etapa que más superficie toca.** Cuatro colecciones, la retirada de `slotOf`, y
+   el ejecutor leyendo de otra fuente. Más que E1 y E2 juntas.
+3. **Las reconstrucciones son deducciones.** Van marcadas y con sus huecos anotados, pero
+   para las sesiones anteriores a E3 «lo que tenías prescrito» es lo mejor deducible, no
+   lo que se congeló.
+4. **`ExerciseOverride` se retira con datos dentro**, y parte de esos datos no tiene fecha.
 
-## Lo que quiero que revises
+## Lo que queda por revisar
 
-1. **§1** — que la variación por fase sea un ajuste `origin: "program"` y no parte de la
-   base. Es lo que hace que la app nunca «crea» que una fase son N series, pero añade una
-   indirección.
-2. **§2.2** — la precedencia, y en particular que `safety` sólo se quite revocándolo.
-3. **§7 paso 4** — instantáneas retroactivas marcadas como reconstruidas, en vez de no
-   tenerlas.
-4. **§5** — que un cambio de plan con la sesión empezada no haga nada salvo ofrecerte
-   tomar una instantánea nueva.
+1. **§3.3** — el ejemplo de las seis consultas. Si esa tabla es lo que esperas, la
+   semántica temporal está bien; si no, es aquí donde hay que discutirlo.
+2. **§6.1** — dejar fuera un override sin fecha y marcar `partial`, en vez de incorporarlo.
+3. **§7.1** — instantánea antes que sesión, y por qué ese orden y no el contrario.
+4. **§10 paso 4** — `ExerciseOverride` sin `updatedAt` se migra con `effectiveOn` = inicio
+   del programa y la suposición anotada.
