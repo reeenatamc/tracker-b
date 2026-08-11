@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Stepper } from "@/components/Stepper";
 import { TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
+import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import { evaluateSafety } from "@/domain/safety";
 import { ankleProtocol } from "@/lib/content";
@@ -87,14 +88,15 @@ function Ankle() {
 			notes: editing?.notes ?? null,
 		};
 		if (editing) {
-			await collections.ankleChecks.update(editing.id, (draft) =>
-				Object.assign(draft, record),
+			await persisted(
+				collections.ankleChecks.update(editing.id, (draft) =>
+					Object.assign(draft, record),
+				),
 			);
 		} else {
-			await collections.ankleChecks.insert({
-				id: crypto.randomUUID(),
-				...record,
-			}).isPersisted.promise;
+			await persisted(
+				collections.ankleChecks.insert({ id: crypto.randomUUID(), ...record }),
+			);
 		}
 		setSaved(true);
 	}

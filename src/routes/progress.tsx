@@ -15,6 +15,7 @@ import { Stepper } from "@/components/Stepper";
 import { PageHeader, TabBar } from "@/components/TabBar";
 import { TickScale } from "@/components/TickScale";
 import { Trend } from "@/components/Trend";
+import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import { summarise } from "@/domain/achievements";
 import {
@@ -193,8 +194,7 @@ function Progress() {
 					check={editing === "new" ? null : editing}
 					onSave={async (check) => {
 						if (editing === "new")
-							await collections.progressChecks.insert(check).isPersisted
-								.promise;
+							await persisted(collections.progressChecks.insert(check));
 						else
 							await collections.progressChecks.update(check.id, (draft) =>
 								Object.assign(draft, check),
@@ -205,8 +205,9 @@ function Progress() {
 						editing === "new"
 							? undefined
 							: async () => {
-									await collections.progressChecks.delete(editing.id)
-										.isPersisted.promise;
+									await persisted(
+										collections.progressChecks.delete(editing.id),
+									);
 									setEditing(null);
 								}
 					}

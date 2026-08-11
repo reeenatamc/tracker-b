@@ -12,6 +12,7 @@ import { useState } from "react";
 import { BackupPanel } from "@/components/BackupPanel";
 import { SetEditor } from "@/components/SetEditor";
 import { PageHeader, TabBar } from "@/components/TabBar";
+import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import { displayName } from "@/domain/exercise-ids";
 import { findExercise } from "@/domain/personalise";
@@ -160,7 +161,7 @@ function History() {
 						setEditing(null);
 					}}
 					onDelete={async () => {
-						await collections.sets.delete(editing.set.id).isPersisted.promise;
+						await persisted(collections.sets.delete(editing.set.id));
 						setEditing(null);
 					}}
 					onClose={() => setEditing(null)}

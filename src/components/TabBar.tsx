@@ -4,6 +4,7 @@
 
 import { Link } from "@tanstack/react-router";
 import { RestBar } from "./RestTimer";
+import { SaveStatus } from "./SaveStatus";
 import { SyncStatus } from "./SyncStatus";
 
 const TABS = [
@@ -19,6 +20,9 @@ export function TabBar() {
 		<nav className="fixed inset-x-0 bottom-0 border-t border-line bg-ground/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
 			<div className="mx-auto max-w-lg">
 				<RestBar />
+				{/* Antes que el sync: que algo no se haya guardado importa más
+				    que que no haya viajado. */}
+				<SaveStatus />
 				<SyncStatus />
 			</div>
 			<div className="mx-auto flex max-w-lg border-t border-line">

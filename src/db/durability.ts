@@ -42,12 +42,19 @@ export type DurabilityTracker = {
 	readonly failures: readonly DurabilityFailure[];
 	/** Notified whenever the pending count changes. */
 	subscribe(listener: (pending: number) => void): () => void;
+	/**
+	 * Notified when a write fails to land. Separate from `subscribe` because a
+	 * failure is news and a changing count is not — a screen wants to say
+	 * something about one and nothing about the other.
+	 */
+	onFailure(listener: (failure: DurabilityFailure) => void): () => void;
 };
 
 export function createDurabilityTracker(): DurabilityTracker {
 	let pending = 0;
 	const failures: DurabilityFailure[] = [];
 	const listeners = new Set<(pending: number) => void>();
+	const failureListeners = new Set<(failure: DurabilityFailure) => void>();
 	/** Everything in flight, so `whenAllPersisted` has something to await. */
 	const inFlight = new Set<Promise<unknown>>();
 
@@ -90,7 +97,9 @@ export function createDurabilityTracker(): DurabilityTracker {
 				// Recorded, not rethrown: this is a bookkeeping observer, and an
 				// unhandled rejection here would be noise on top of a real failure
 				// the caller is already free to handle on its own copy of the promise.
-				failures.push({ at: Date.now(), error });
+				const failure = { at: Date.now(), error };
+				failures.push(failure);
+				for (const listener of failureListeners) listener(failure);
 				done();
 			});
 
@@ -109,6 +118,11 @@ export function createDurabilityTracker(): DurabilityTracker {
 		subscribe(listener) {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
+		},
+
+		onFailure(listener) {
+			failureListeners.add(listener);
+			return () => failureListeners.delete(listener);
 		},
 	};
 }
@@ -142,4 +156,27 @@ export function durable<C extends object>(
 			return Reflect.get(target, property, receiver);
 		},
 	}) as C;
+}
+
+/**
+ * Awaits a write and reports whether it landed, without ever rejecting.
+ *
+ * The call sites that hold training data need to wait for the disk, but they must
+ * not blow up on the way: a rejected `isPersisted` left unhandled is a silent
+ * failure plus an unhandled rejection, which is the worst of both. The tracker has
+ * already recorded the error and told anyone listening — this is just how a caller
+ * waits without turning a bad disk into a crash.
+ */
+export async function persisted(transaction: {
+	isPersisted?: { promise?: Promise<unknown> };
+}): Promise<boolean> {
+	const promise = transaction?.isPersisted?.promise;
+	if (!promise) return true;
+
+	try {
+		await promise;
+		return true;
+	} catch {
+		return false;
+	}
 }

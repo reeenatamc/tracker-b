@@ -26,6 +26,7 @@ import { type NextTarget, SessionComplete } from "@/components/SessionComplete";
 import { SetEditor } from "@/components/SetEditor";
 import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
 import { TabBar } from "@/components/TabBar";
+import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import {
 	personalRecords,
@@ -147,7 +148,7 @@ function Today() {
 			skippedExerciseIds: [],
 			extraExerciseIds: [],
 		});
-		return { id, persisted: transaction.isPersisted.promise };
+		return { id, persisted: persisted(transaction) };
 	}
 
 	function startSession() {
@@ -172,11 +173,13 @@ function Today() {
 			)
 			.sort((a, b) => a - b)[0];
 
-		return collections.sessions.update(session.id, (draft) => {
-			draft.startedAt ??= firstSetAt ?? null;
-			draft.endedAt = Date.now();
-			draft.completed = true;
-		}).isPersisted.promise;
+		return persisted(
+			collections.sessions.update(session.id, (draft) => {
+				draft.startedAt ??= firstSetAt ?? null;
+				draft.endedAt = Date.now();
+				draft.completed = true;
+			}),
+		);
 	}
 
 	async function saveCardio(minutes: number) {
@@ -199,7 +202,7 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
-		await Promise.all([session.persisted, transaction.isPersisted.promise]);
+		await Promise.all([session.persisted, persisted(transaction)]);
 	}
 
 	/**
@@ -220,14 +223,11 @@ function Today() {
 		// The rest timer starts on the write reaching memory, not on the flush: it
 		// is about the muscle, and making it wait on the disk would be a lie in the
 		// other direction.
-		const persisted = Promise.all([
-			session.persisted,
-			transaction.isPersisted.promise,
-		]);
+		const landed = Promise.all([session.persisted, persisted(transaction)]);
 
 		// Approach sets do not earn a full rest, and timed work is its own timer.
 		if (newSet.isWarmup || newSet.unit === "minutes") {
-			await persisted;
+			await landed;
 			return;
 		}
 
@@ -240,7 +240,7 @@ function Today() {
 			(exercise) => exercise.id === newSet.exerciseId,
 		)?.restSeconds;
 		rest.start(prescribed?.min);
-		await persisted;
+		await landed;
 	}
 
 	function saveOverride(exerciseId: string, changes: OverrideChanges) {
@@ -309,7 +309,7 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
-		await Promise.all([session.persisted, transaction.isPersisted.promise]);
+		await Promise.all([session.persisted, persisted(transaction)]);
 	}
 
 	const exercises = template
@@ -632,14 +632,16 @@ function Today() {
 					set={editingSet.set}
 					exercise={editingSet.exercise}
 					targetRir={phase.targetRir}
-					onSave={(changes) => {
-						collections.sets.update(editingSet.set.id, (draft) =>
-							Object.assign(draft, changes),
+					onSave={async (changes) => {
+						await persisted(
+							collections.sets.update(editingSet.set.id, (draft) =>
+								Object.assign(draft, changes),
+							),
 						);
 						setEditingSet(null);
 					}}
-					onDelete={() => {
-						collections.sets.delete(editingSet.set.id);
+					onDelete={async () => {
+						await persisted(collections.sets.delete(editingSet.set.id));
 						setEditingSet(null);
 					}}
 					onClose={() => setEditingSet(null)}

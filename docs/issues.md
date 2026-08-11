@@ -8,7 +8,12 @@ de sitio y quitarle la única pista que había.
 
 ## T-001 · Una serie registrada no sobrevive a la recarga
 
-**Estado:** **reproducido y diagnosticado** · **Severidad: alta** · Corrección pendiente de aprobación
+**Estado: RESUELTO** · commit `e30a16d` · etiqueta `t001` · **Severidad era: alta**
+
+> **Antes:** 120 pérdidas / 250 iteraciones.
+> **Después:** 0 / 250, y 0 / 400 en la corrida extendida — 2 795 escrituras en total.
+> El harness se conserva en `harness/` como prueba de regresión: cualquier cambio futuro
+> en persistencia se mide contra estos mismos diez escenarios.
 
 ### Reproducido: 120 pérdidas en 250 iteraciones
 
@@ -71,7 +76,22 @@ seguidas**, que es lo que hace un doble toque o el registro rápido de dos serie
 No lo introdujeron E1 ni E2. Es anterior a las dos, y vive entero en
 `db/collections.ts` y en cómo la app llama a `insert()`.
 
-### Corrección propuesta, sin aplicar
+### Corrección aplicada
+
+| Escenario | antes | después |
+|---|---:|---:|
+| sin interrupción · recargar 50 ms | 0 | 0 |
+| recargar 5 ms | 2 | **0** |
+| recargar 0 ms | 6 | **0** |
+| navegar 5 ms | 2 | **0** |
+| navegar 0 ms | 10 | **0** |
+| doble click | 25/25 | **0** |
+| ráfaga de 10 | 25/25 | **0** |
+| ráfaga bajo carga | 25/25 | **0** |
+| `pagehide` durante la escritura | 25/25 | **0** |
+| **total** | **120 / 250** | **0 / 250** |
+
+Las tres piezas:
 
 Toca durabilidad de datos y merece su propia revisión. Tres piezas:
 
@@ -83,10 +103,17 @@ Toca durabilidad de datos y merece su propia revisión. Tres piezas:
 3. **Que `syncable()` lleve la cuenta** de las transacciones en vuelo y exponga un
    `whenAllPersisted()`, para que el punto 2 tenga a qué esperar.
 
-`src/db/durability.test.ts` deja las dos primeras como pruebas `it.fails`: afirman el
-contrato que la app debería cumplir y hoy fallan a propósito. Cuando la corrección aterrice
-empezarán a pasar, y eso hará fallar el `it.fails` — que es la señal para convertirlas en
-aserciones normales.
+Y una cuarta que no estaba en la propuesta: un fallo real de persistencia ahora llega a la
+pantalla. `SaveStatus` se sienta encima de la barra de pestañas, por delante del estado de
+sincronización, y no se va solo — un aviso sobre una serie posiblemente perdida que se
+desvanece en tres segundos es un aviso para quien estuviera mirando la pantalla, y el
+sentido de todo esto es que estabas mirando la barra.
+
+`src/db/durability.test.ts` protege el resultado en tres frentes: las dos afirmaciones que
+la app incumplía son ahora aserciones normales; una guarda estructural exige que toda
+escritura a una colección crítica desde una pantalla espere al disco, con una lista
+explícita de excepciones que obliga a justificar cada una; y `persisted()` se comprueba
+contra un rechazo real.
 
 ### Cómo volver a correrlo
 

@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { Photo } from "@/components/Photo";
 import { NoteField, PrimaryButton, Sheet } from "@/components/Sheet";
 import { PageHeader, TabBar } from "@/components/TabBar";
+import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import type { InspoItem } from "@/domain/schema";
 import { formatDayMonth, todayIso } from "@/lib/format";
@@ -41,7 +42,7 @@ function Inspo() {
 
 	async function remove(item: InspoItem) {
 		if (item.photoId) await deletePhoto(item.photoId);
-		await collections.inspo.delete(item.id).isPersisted.promise;
+		await persisted(collections.inspo.delete(item.id));
 		setEditing(null);
 		photosSize().then(setStorage);
 	}
@@ -123,7 +124,7 @@ function Inspo() {
 					kind={adding}
 					onClose={() => setAdding(null)}
 					onSave={async (item) => {
-						await collections.inspo.insert(item).isPersisted.promise;
+						await persisted(collections.inspo.insert(item));
 						setAdding(null);
 						photosSize().then(setStorage);
 					}}
