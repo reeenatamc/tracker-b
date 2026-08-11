@@ -292,11 +292,16 @@ miércoles, y una frontera temporal metería o dejaría fuera al que no toca.
 Así que la frontera es **un conjunto explícito**, no un instante:
 
 ```ts
-export type KnowledgeCut = {
+/** Lo que E3 consume y puede garantizar. */
+export type PrescriptionKnowledgeCut = {
   adjustmentIds: string[]
-  phaseEventIds: string[]
 }
 ```
+
+El tipo se queda ahí a propósito. Una `KnowledgeCut` con `phaseEventIds` prometería que
+acotar la fase también funciona, y en E3 no funciona: `phaseForDate` sigue usando todos los
+eventos. Un tipo que finge una garantía que no da es peor que uno estrecho — el estrecho se
+ensancha en E4 sin que nadie haya confiado en lo que no existía.
 
 `createdAt` se queda —hace falta para ordenar y para auditar— pero **no decide por sí solo
 qué conocía una consulta**. Es la misma lección que los ids de ejercicio y los de fase: un
@@ -379,13 +384,13 @@ export type AsOf = {
   /** La fecha cuya prescripción se consulta. */
   effectiveOn: IsoDate
   /** Qué se conocía. `null` = todo lo presente, que es la consulta en vivo. */
-  knows: KnowledgeCut | null
+  knows: PrescriptionKnowledgeCut | null
 }
 
 export function resolvePrescription(
   baseline: readonly PrescriptionBaseline[],
   adjustments: readonly PlanAdjustment[],
-  phaseAt: (date: IsoDate, knows: KnowledgeCut | null) => Phase,
+  phaseAt: (date: IsoDate) => Phase,
   templateId: string,
   asOf: AsOf,
 ): PrescriptionEntry[]
@@ -399,9 +404,9 @@ export function resolvePrescription(
 
 `phaseAt` se recibe como función, no se importa: **la fase también es bitemporal**. Una
 corrección de `PhaseEvent` escrita en diciembre tampoco puede mover lo que una versión de
-octubre resolvía, así que `phaseForDate` acepta un conjunto de ids además de la lista
-completa, y resuelve sólo con ellos. Es el único cambio que E3 hace en el código de E2 — y
-no filtra por reloj, por la razón de §3.0.
+octubre resolvía. **Pero eso es E4.** En E3 `phaseAt` no recibe corte alguno y resuelve con
+todos los eventos de fase: acotar la fase es media garantía de reproducibilidad, y media
+garantía escrita en un tipo se lee como una entera. E3 no toca el código de E2.
 
 Pura, sin E/S. Como todo lo que decide algo aquí.
 
@@ -591,17 +596,48 @@ SessionRecord.prescriptionContract: "legacy" | "snapshot_v1"
 
 - La migración marca `legacy` toda sesión existente.
 - Todo lo que E3 crea nace `snapshot_v1`.
-- **Ausente cuenta como `legacy`**: viene de un dispositivo que aún no migró, y una sesión
-  de antes de E3 es exactamente lo que es. `normalizeIncoming` la estampa al entrar, igual
-  que ya hace con la fase numérica.
 
-El contrato viaja con la fila, así que sobrevive a cualquier orden de sincronización.
+**Ausente no significa `legacy` sin más.** Esa regla universal taparía una corrupción futura
+—una sesión de E3 que perdiera el campo pasaría por histórica y se reconstruiría en
+silencio, que es justo lo que §7.2 existe para impedir.
+
+Hace falta procedencia demostrable, y ya hay de dónde sacarla: `syncable()` estampa cada
+escritura, así que **estampa también bajo qué esquema se escribió**.
+
+```ts
+// db/synced.ts — una línea más en stamp()
+schemaVersion: SYNC_SCHEMA_VERSION   // E3 la sube a 3
+```
+
+| Procedencia de la fila | `prescriptionContract` | Qué se hace |
+|---|---|---|
+| `schemaVersion` ausente o `< 3` | ausente | Anterior a E3. Se normaliza a `legacy` |
+| `schemaVersion >= 3` | ausente | **Inválida.** Violación de invariante: se reporta |
+| cualquiera | presente | Se respeta |
+
+Una fila sin `schemaVersion` viene de antes de que existiera el sello, es decir de antes de
+E3 por construcción. Una escrita bajo E3 que llegue sin contrato no es histórica: está rota,
+y decirlo es más útil que adivinar.
+
+`normalizeIncoming` aplica la primera fila al entrar, igual que ya hace con la fase numérica.
+El contrato viaja después con el dato, así que sobrevive a cualquier orden de
+sincronización.
 
 | `prescriptionContract` | Sin instantánea | Qué se hace |
 |---|---|---|
 | `legacy` | con o sin series | Se reconstruye (§6.1) |
-| `snapshot_v1` | con series | **Violación de G3.** Se reporta, no se reconstruye |
-| `snapshot_v1` | sin series | Nunca llegó a empezar. Se descarta |
+| `snapshot_v1` | **con o sin series** | **Violación de G3.** Se reporta. Ni se reconstruye ni se borra |
+
+**El número de series no dice nada aquí, y creer que sí era una incoherencia con §7.1.** El
+orden aprobado persiste la instantánea *antes* que la sesión, así que la mera existencia de
+una `SessionRecord` con `snapshot_v1` demuestra que el paso 2 terminó. Si la instantánea no
+está, algo la destruyó — y eso es igual de grave con cero series que con veinte.
+
+Tampoco se borra. Puede que la instantánea exista **en el otro dispositivo** y llegue por
+sincronización; borrar la sesión cerraría esa puerta. Se reporta y se deja recuperable.
+
+El único «nunca llegó a empezar» es el contrario: **una instantánea sin sesión**, que es la
+huérfana del paso 3 y se recoge bajo §6.4.
 
 `MigrationRecord` se conserva —qué se migró, cuándo, qué overrides llevaban fecha asumida—
 pero como **evidencia de auditoría, no como fuente de verdad**.
@@ -639,13 +675,14 @@ El diseño bitemporal se queda escrito aquí porque es lo que obliga al resolver
 forma que tiene. Pero **E3 no implementa versiones**: ni la colección `ProgramVersion`, ni
 `diffVersions`, ni pantalla. Eso vuelve a E4, donde estaba en la arquitectura original.
 
-Lo que E3 sí entrega es la **capacidad**: el resolver acepta un `KnowledgeCut` opcional.
+Lo que E3 sí entrega es la **capacidad**: el resolver acepta un
+`PrescriptionKnowledgeCut` opcional.
 
 ```ts
 export type AsOf = {
   effectiveOn: IsoDate
-  /** `null` = consulta en vivo, todo lo presente. E3 sólo usa esto. */
-  knows: KnowledgeCut | null
+  /** `null` = consulta en vivo, todo lo presente. E3 sólo usa esto en producto. */
+  knows: PrescriptionKnowledgeCut | null
 }
 ```
 
@@ -660,17 +697,21 @@ El contrato que E4 heredará, para que no haya que redescubrirlo:
 
 ```ts
 // E4, no E3
+type ProgramKnowledgeCut = PrescriptionKnowledgeCut & {
+  phaseEventIds: string[]
+}
+
 type ProgramVersion = {
   id: string; label: string
   cutAt: IsoDate
-  knows: KnowledgeCut       // congelado id por id, nunca un instante
+  knows: ProgramKnowledgeCut   // congelado id por id, nunca un instante
   reason: string; createdAt: number
 }
 ```
 
-`knows` incluye `phaseEventIds`, así que `phaseForDate` también tendrá que aceptar un corte.
-**Ese cambio a E2 se hace en E4, no ahora** — E3 no lo necesita y adelantarlo sería tocar
-código de otra etapa sin motivo.
+E4 **ensancha** el tipo de E3 en vez de estrecharlo, que es la dirección que no rompe nada:
+todo lo que E3 escribió sigue siendo válido. Y `phaseForDate` aceptará el corte entonces —
+ese cambio a E2 pertenece a E4, no a ahora.
 
 ## 10. Migración
 
@@ -742,9 +783,11 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 6. Orden determinista: el mismo conjunto barajado resuelve idéntico.
 
 **Capacidad bitemporal — sin producto de versiones**
-7. Un `KnowledgeCut` artificial resuelve distinto de la consulta en vivo.
+7. Un `PrescriptionKnowledgeCut` artificial resuelve distinto de la consulta en vivo.
 8. Un ajuste fuera del corte no influye, aunque su `createdAt` sea anterior a todo.
 9. La consulta en vivo (`knows: null`) usa todo lo presente.
+9a. **El corte no alcanza a la fase:** dar un corte no cambia qué fase se resuelve, porque
+   `phaseAt` no lo recibe. Se prueba para que el tipo no aparente lo que no hace.
 
 **Cambios estructurales**
 9b. Un hueco creado con `add_entry` recibe un id opaco que **no** está en el fixture, y el
@@ -773,11 +816,15 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 19. Instantánea huérfana **no** se borra antes de las 24 h ni sin una sincronización
     posterior; sí después.
 19b. Una `committed` referenciada no se puede borrar ni actualizar, nunca.
-19c. Una sesión `snapshot_v1` sin instantánea se **reporta** como violación de G3.
+19c. Una sesión `snapshot_v1` sin instantánea se **reporta** como violación de G3 —
+    **con veinte series y con cero**, y en ninguno de los dos casos se borra.
 19d. Una sesión `legacy` sin instantánea se reconstruye.
 19e. **Dos dispositivos:** A migra; una sesión `legacy` llega de B **después**; A la
     reconstruye en vez de tratarla como corrupción.
-19f. Una sesión que llega **sin** el campo se trata como `legacy`.
+19f. Una sesión sin el campo y con `schemaVersion` ausente o `< 3` se normaliza a `legacy`.
+19g. Una sesión sin el campo pero escrita bajo `schemaVersion >= 3` **no** se convierte en
+    `legacy`: se reporta como inválida. Es el caso que una regla universal habría tapado.
+19h. Sólo una instantánea sin sesión cuenta como «nunca llegó a empezar».
 20. Fallo al persistir la sesión tras la instantánea → no queda sesión sin plan.
 21. Adoptar a mitad: si falla la persistencia, sigue mandando la anterior.
 22. Recuperación idempotente: correrla dos veces no cambia nada.
@@ -821,7 +868,10 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 11. Una `committed` referenciada por una sesión nunca se actualiza ni se borra.
 12. Una reconstruida siempre va marcada, con su confianza y sus huecos.
 12b. Una instantánea sin sesión sólo se recoge tras 24 h y una sincronización posterior.
-12c. Una sesión `snapshot_v1` nunca se reconstruye.
+12c. Una sesión `snapshot_v1` nunca se reconstruye ni se borra automáticamente,
+    independientemente de cuántas series tenga.
+12e. Un contrato ausente sólo se normaliza a `legacy` con procedencia anterior a E3
+    demostrable por `schemaVersion`.
 12d. El contrato de prescripción viaja en la propia sesión, no en una lista aparte.
 13. Ajustes, instantáneas y versiones sólo crecen.
 14. La base no se reescribe.
@@ -841,6 +891,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 20. Ninguna sesión existe sin instantánea.
 21. E3 no emite sugerencias.
 22. E3 no crea ni compara versiones: eso es E4.
+23. El corte de E3 sólo acota ajustes. Acotar fases es E4, y el tipo lo refleja.
 
 ## 14. Archivos
 
@@ -883,7 +934,7 @@ de versiones:** eso es E4.
 | 2 | **G3**: ninguna sesión existe sin instantánea | Pruebas 19–22 |
 | 3 | **G4**: sin motor | Pruebas 28–29 |
 | 4 | Revocar no reescribe el pasado | Pruebas 2–3 |
-| 5 | El resolver acepta un corte y responde distinto con él | Pruebas 7–9 |
+| 5 | El resolver acepta un corte de ajustes y responde distinto con él | Pruebas 7–9a |
 | 6 | El id de un hueco sobrevive al cambio de ejercicio | Prueba 11 |
 | 7 | Los cuatro cambios estructurales se representan | Pruebas 10, 12 |
 | 8 | Ninguna reconstrucción inventa un override | Pruebas 17–18 |
