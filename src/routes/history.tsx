@@ -153,14 +153,14 @@ function History() {
 					set={editing.set}
 					exercise={editing.exercise}
 					targetRir={phaseById(program, editing.phase).targetRir}
-					onSave={(changes) => {
-						collections.sets.update(editing.set.id, (draft) =>
+					onSave={async (changes) => {
+						await collections.sets.update(editing.set.id, (draft) =>
 							Object.assign(draft, changes),
 						);
 						setEditing(null);
 					}}
-					onDelete={() => {
-						collections.sets.delete(editing.set.id);
+					onDelete={async () => {
+						await collections.sets.delete(editing.set.id).isPersisted.promise;
 						setEditing(null);
 					}}
 					onClose={() => setEditing(null)}

@@ -191,10 +191,12 @@ function Progress() {
 			{editing ? (
 				<CheckEditor
 					check={editing === "new" ? null : editing}
-					onSave={(check) => {
-						if (editing === "new") collections.progressChecks.insert(check);
+					onSave={async (check) => {
+						if (editing === "new")
+							await collections.progressChecks.insert(check).isPersisted
+								.promise;
 						else
-							collections.progressChecks.update(check.id, (draft) =>
+							await collections.progressChecks.update(check.id, (draft) =>
 								Object.assign(draft, check),
 							);
 						setEditing(null);
@@ -202,8 +204,9 @@ function Progress() {
 					onDelete={
 						editing === "new"
 							? undefined
-							: () => {
-									collections.progressChecks.delete(editing.id);
+							: async () => {
+									await collections.progressChecks.delete(editing.id)
+										.isPersisted.promise;
 									setEditing(null);
 								}
 					}

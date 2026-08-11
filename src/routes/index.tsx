@@ -126,10 +126,14 @@ function Today() {
 	const latestCheck =
 		[...ankleChecks].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
 
-	function ensureSession(): string {
-		if (session) return session.id;
+	/**
+	 * The session a set will hang off. Returns the id and the promise that it
+	 * reached disk — a set whose session never persisted would be an orphan.
+	 */
+	function ensureSession(): { id: string; persisted: Promise<unknown> } {
+		if (session) return { id: session.id, persisted: Promise.resolve() };
 		const id = crypto.randomUUID();
-		collections.sessions.insert({
+		const transaction = collections.sessions.insert({
 			id,
 			date: today,
 			templateId: template?.id ?? "unscheduled",
@@ -143,7 +147,7 @@ function Today() {
 			skippedExerciseIds: [],
 			extraExerciseIds: [],
 		});
-		return id;
+		return { id, persisted: transaction.isPersisted.promise };
 	}
 
 	function startSession() {
@@ -153,7 +157,7 @@ function Today() {
 		});
 	}
 
-	function finishSession() {
+	async function finishSession() {
 		if (!session) return;
 		/*
 		 * Sessions logged before the clock existed have no start time. Rather than
@@ -168,17 +172,18 @@ function Today() {
 			)
 			.sort((a, b) => a - b)[0];
 
-		collections.sessions.update(session.id, (draft) => {
+		return collections.sessions.update(session.id, (draft) => {
 			draft.startedAt ??= firstSetAt ?? null;
 			draft.endedAt = Date.now();
 			draft.completed = true;
-		});
+		}).isPersisted.promise;
 	}
 
-	function saveCardio(minutes: number) {
-		collections.sets.insert({
+	async function saveCardio(minutes: number) {
+		const session = ensureSession();
+		const transaction = collections.sets.insert({
 			id: crypto.randomUUID(),
-			sessionId: ensureSession(),
+			sessionId: session.id,
 			exerciseId: "cardio_machine",
 			setNumber:
 				sets.filter(
@@ -194,16 +199,37 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
+		await Promise.all([session.persisted, transaction.isPersisted.promise]);
 	}
 
-	function saveSet(newSet: NewSet) {
-		collections.sets.insert({
+	/**
+	 * A set is not saved until it is on disk.
+	 *
+	 * `insert` updates memory and returns; the flush lands afterwards. Walking away
+	 * in between is how six sets in twenty-five used to disappear — and two saves in
+	 * one tick lost one every time. Awaiting closes that window to the length of a
+	 * flush, which is milliseconds.
+	 */
+	async function saveSet(newSet: NewSet) {
+		const session = ensureSession();
+		const transaction = collections.sets.insert({
 			...newSet,
 			id: crypto.randomUUID(),
-			sessionId: ensureSession(),
+			sessionId: session.id,
 		});
+		// The rest timer starts on the write reaching memory, not on the flush: it
+		// is about the muscle, and making it wait on the disk would be a lie in the
+		// other direction.
+		const persisted = Promise.all([
+			session.persisted,
+			transaction.isPersisted.promise,
+		]);
+
 		// Approach sets do not earn a full rest, and timed work is its own timer.
-		if (newSet.isWarmup || newSet.unit === "minutes") return;
+		if (newSet.isWarmup || newSet.unit === "minutes") {
+			await persisted;
+			return;
+		}
 
 		/*
 		 * v3 states rest per exercise — 90–120 s on the leg press, 60 s on the
@@ -214,6 +240,7 @@ function Today() {
 			(exercise) => exercise.id === newSet.exerciseId,
 		)?.restSeconds;
 		rest.start(prescribed?.min);
+		await persisted;
 	}
 
 	function saveOverride(exerciseId: string, changes: OverrideChanges) {
@@ -259,19 +286,19 @@ function Today() {
 		});
 	}
 
-	function addFinisher(custom: CustomExercise, minutes: number) {
+	async function addFinisher(custom: CustomExercise, minutes: number) {
 		if (!collections.customExercises.has(custom.id)) {
 			collections.customExercises.insert(custom);
 		}
-		const id = ensureSession();
-		collections.sessions.update(id, (draft) => {
+		const session = ensureSession();
+		collections.sessions.update(session.id, (draft) => {
 			draft.extraExerciseIds = [
 				...new Set([...draft.extraExerciseIds, custom.id]),
 			];
 		});
-		collections.sets.insert({
+		const transaction = collections.sets.insert({
 			id: crypto.randomUUID(),
-			sessionId: id,
+			sessionId: session.id,
 			exerciseId: custom.id,
 			setNumber: 1,
 			isWarmup: false,
@@ -282,6 +309,7 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
+		await Promise.all([session.persisted, transaction.isPersisted.promise]);
 	}
 
 	const exercises = template

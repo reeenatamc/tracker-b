@@ -12,10 +12,10 @@
  * reload one tick after the write, 6 of 25 sets vanish; with two writes in the
  * same tick, 25 of 25 lose at least one; with a burst of ten, all of them.
  *
- * The two tests below are marked `it.fails`: they assert the contract the app
- * *should* meet and are expected to fail today. When the fix lands they will
- * start passing, which makes `it.fails` itself fail — and that is the signal to
- * turn them into ordinary assertions. A red test that keeps the suite green.
+ * These were `it.fails` while the bug stood: they asserted the contract the app
+ * did not meet, and stayed red on purpose. The fix landed, they went green, and
+ * `it.fails` started failing — which was the signal to promote them to ordinary
+ * assertions. That is what they are now, and what stops this coming back.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -34,7 +34,7 @@ describe("T-001 · durabilidad de una serie registrada", () => {
 	/**
 	 * The direct statement of the bug. Every write goes out unobserved.
 	 */
-	it.fails("algún sitio espera a que la escritura llegue al disco", () => {
+	it("los sitios críticos esperan a que la escritura llegue al disco", () => {
 		const awaited = [
 			...sources("routes"),
 			...sources("components"),
@@ -55,7 +55,7 @@ describe("T-001 · durabilidad de una serie registrada", () => {
 	 * harness scenario that fires `pagehide` by hand loses the write 25 times out
 	 * of 25.
 	 */
-	it.fails("al descargar la página no se cierra la base con escrituras pendientes", () => {
+	it("al descargar la página no se cierra la base con escrituras pendientes", () => {
 		const source = readFileSync(join(SRC, "db", "collections.ts"), "utf8");
 		const handler = source.slice(source.indexOf("pagehide"));
 

@@ -73,7 +73,7 @@ function Ankle() {
 
 	const verdict = evaluateSafety({ pain, swelling, givesWay });
 
-	function save() {
+	async function save() {
 		const record = {
 			date: today,
 			pain,
@@ -87,11 +87,14 @@ function Ankle() {
 			notes: editing?.notes ?? null,
 		};
 		if (editing) {
-			collections.ankleChecks.update(editing.id, (draft) =>
+			await collections.ankleChecks.update(editing.id, (draft) =>
 				Object.assign(draft, record),
 			);
 		} else {
-			collections.ankleChecks.insert({ id: crypto.randomUUID(), ...record });
+			await collections.ankleChecks.insert({
+				id: crypto.randomUUID(),
+				...record,
+			}).isPersisted.promise;
 		}
 		setSaved(true);
 	}

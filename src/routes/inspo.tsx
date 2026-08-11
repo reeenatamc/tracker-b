@@ -41,7 +41,7 @@ function Inspo() {
 
 	async function remove(item: InspoItem) {
 		if (item.photoId) await deletePhoto(item.photoId);
-		collections.inspo.delete(item.id);
+		await collections.inspo.delete(item.id).isPersisted.promise;
 		setEditing(null);
 		photosSize().then(setStorage);
 	}
@@ -122,8 +122,8 @@ function Inspo() {
 				<AddItem
 					kind={adding}
 					onClose={() => setAdding(null)}
-					onSave={(item) => {
-						collections.inspo.insert(item);
+					onSave={async (item) => {
+						await collections.inspo.insert(item).isPersisted.promise;
 						setAdding(null);
 						photosSize().then(setStorage);
 					}}

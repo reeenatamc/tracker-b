@@ -43,7 +43,15 @@ type Scenario = {
 	forcePagehide?: boolean;
 };
 
-const ITERATIONS = 25;
+const EXTENDED = new URLSearchParams(location.search).has("extended");
+
+/**
+ * The long run: same scenarios, forty iterations each. Because the bursts write
+ * ten sets at a time, that is roughly 2 600 write operations on top of the 1 635
+ * the standard run already did — a race that survives all of that has had its
+ * chances.
+ */
+const ITERATIONS = EXTENDED ? 40 : 25;
 
 const SCENARIOS: Scenario[] = [
 	// The control. If this ever fails, the harness itself is wrong.
@@ -115,7 +123,7 @@ type State = {
 	startedAt: number;
 };
 
-const KEY = "t001-state";
+const KEY = EXTENDED ? "t001-state-extended" : "t001-state";
 
 function load(): State {
 	const raw = localStorage.getItem(KEY);
@@ -207,8 +215,14 @@ async function main(): Promise<void> {
 	};
 
 	const collections = await getCollections();
-	// Give the collection a moment to finish loading from disk before counting.
-	await sleep(120);
+
+	/*
+	 * Wait for the collection to have actually loaded from disk rather than
+	 * sleeping and hoping. Sleeping made the harness report "stale view" whenever
+	 * the reopen happened to be slow, which is a measurement artefact and not a
+	 * property of the write.
+	 */
+	await collections.raw.sets.preload();
 
 	const setsOf = () => collections.raw.sets.toArray as Array<{ id: string }>;
 
@@ -225,8 +239,7 @@ async function main(): Promise<void> {
 		} else if (missing.length === 0) {
 			outcome = "ok";
 		} else {
-			// A miss is not a loss until a second, later read agrees. The first read
-			// after a reload can legitimately race the collection's own load.
+			// A miss is not a loss until a second, later read agrees.
 			await sleep(400);
 			const later = new Set(setsOf().map((row) => row.id));
 			missing = pending.ids.filter((id) => !later.has(id));
@@ -301,8 +314,11 @@ async function main(): Promise<void> {
 		pressure = setInterval(() => void setsOf().length, 0);
 	}
 
+	// Mirrors the app after the fix: a write is not done until it is on disk.
+	const transactions: Array<{ isPersisted: { promise: Promise<unknown> } }> = [];
+
 	for (const id of ids) {
-		collections.sets.insert({
+		transactions.push(collections.sets.insert({
 			id,
 			sessionId: `t001-session-${state.scenario}`,
 			exerciseId: "lat_pulldown",
@@ -314,10 +330,14 @@ async function main(): Promise<void> {
 			rir: 2,
 			anklePain: null,
 			note: null,
-		});
+		}) as { isPersisted: { promise: Promise<unknown> } });
 	}
 
-	// Every insert() has returned. If the page dies after this and the row is
+	await Promise.all(
+		transactions.map((transaction) => transaction.isPersisted.promise),
+	);
+
+	// Every write has reached the disk. If the page dies after this and the row is
 	// gone, that is the real thing.
 	pending.returnedAt = Date.now();
 	state.pending = pending;
@@ -331,7 +351,11 @@ async function main(): Promise<void> {
 	}
 
 	if (scenario.disruption === "reload") location.reload();
-	else if (scenario.disruption === "navigate") location.href = "./index.html";
+	else if (scenario.disruption === "navigate") {
+		// Keep the query string: dropping it switched the extended run back to the
+		// standard one halfway through, and the counter silently stopped moving.
+		location.href = `./index.html${location.search}`;
+	}
 }
 
 void main().catch((error: unknown) => {

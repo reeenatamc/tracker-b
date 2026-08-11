@@ -42,9 +42,12 @@ describe("phaseEvents sólo crece", () => {
 		expect(source).toMatch(/phaseEvents:\s*appendOnly\(/);
 	});
 
-	it("appendOnly va por fuera de syncable, para interceptar antes de estampar", () => {
+	it("appendOnly va por fuera, para interceptar antes que nada", () => {
 		const source = read("db", "collections.ts");
-		expect(source).toMatch(/appendOnly\(syncable\(phaseEvents\)\)/);
+		// `write` es durable(syncable(...)): appendOnly tiene que envolverlo a él,
+		// no al revés, o una edición se estamparía y se contaría antes de rechazarse.
+		expect(source).toMatch(/appendOnly\(write\(phaseEvents\)\)/);
+		expect(source).toMatch(/durable\(syncable\(collection\), tracker\)/);
 	});
 
 	it("ninguna pantalla llama a update o delete sobre phaseEvents", () => {
