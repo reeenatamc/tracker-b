@@ -12,7 +12,7 @@
  * `useRecords`, which filters them out.
  */
 
-import type { SyncRecord } from "@/domain/sync";
+import { SYNC_SCHEMA_VERSION, type SyncRecord } from "@/domain/sync";
 
 type WritableCollection = {
 	insert(value: Record<string, unknown>): unknown;
@@ -20,9 +20,23 @@ type WritableCollection = {
 	delete(id: string): unknown;
 };
 
-/** Fields sync adds to every record. Absent on rows written before sync existed. */
-export function stamp(): Pick<SyncRecord, "updatedAt" | "deletedAt"> {
-	return { updatedAt: Date.now(), deletedAt: null };
+/**
+ * Fields sync adds to every record. Absent on rows written before sync existed.
+ *
+ * `schemaVersion` is what lets a reader tell "written before this field existed"
+ * from "written after it existed and lost it". A row with no stamp predates
+ * stamping, which predates E3 by construction; one stamped at 3 or above that is
+ * missing its prescription contract is not historical, it is broken — and saying
+ * so beats guessing.
+ */
+export function stamp(): Pick<SyncRecord, "updatedAt" | "deletedAt"> & {
+	schemaVersion: number;
+} {
+	return {
+		updatedAt: Date.now(),
+		deletedAt: null,
+		schemaVersion: SYNC_SCHEMA_VERSION,
+	};
 }
 
 export function syncable<C extends object>(collection: C): C {
@@ -107,6 +121,33 @@ export function appendOnly<C extends object>(collection: C): C {
 				return () => {
 					throw new Error(
 						"Los eventos de fase no se borran: añade una revocación que lo anule.",
+					);
+				};
+			}
+			return Reflect.get(target, property, receiver);
+		},
+	}) as C;
+}
+
+/**
+ * A collection whose rows are never edited, but may be collected.
+ *
+ * Snapshots need exactly this and `appendOnly` would be wrong for them: a
+ * committed one that a session points at is a fact and must never change, while a
+ * reconstructed one is a derivative that regenerates and an unreferenced one may
+ * be rubbish from an interrupted session start.
+ *
+ * Editing is what would corrupt history, so editing is what is refused. Deciding
+ * *when* a delete is legitimate is a domain question, and it lives in
+ * `domain/snapshot.ts` rather than being smuggled into a proxy.
+ */
+export function noUpdate<C extends object>(collection: C): C {
+	return new Proxy(collection, {
+		get(target, property, receiver) {
+			if (property === "update") {
+				return () => {
+					throw new Error(
+						"Una instantánea no se edita: congela otra y deja la anterior donde está.",
 					);
 				};
 			}

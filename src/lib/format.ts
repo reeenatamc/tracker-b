@@ -52,11 +52,12 @@ function range(min: number, max: number): string {
 /**
  * How a set is measured: "10–12", "8/lado", "30 s/lado", "8–10 min".
  *
- * Takes the prescription slot rather than the phase id, because `minutesByPhase`
- * indexes a list by position. Callers get it from `slotOf(program, phase)` — the
- * same bridge the rest of the prescription reads through until E3.
+ * Takes the phase's position rather than its id, because `minutesByPhase` indexes
+ * a list by position. Everything else about a phase is named; this one field is
+ * still ordinal, and saying so is better than passing an id that gets converted
+ * somewhere out of sight.
  */
-export function formatTarget(target: Target, slot: number): string {
+export function formatTarget(target: Target, phaseOrder: number): string {
 	switch (target.kind) {
 		case "reps":
 			return range(target.min, target.max);
@@ -69,7 +70,7 @@ export function formatTarget(target: Target, slot: number): string {
 		case "minutes":
 			return `${range(target.min, target.max)} min`;
 		case "minutesByPhase": {
-			const forPhase = target.byPhase[slot - 1] ?? target.byPhase[0];
+			const forPhase = target.byPhase[phaseOrder - 1] ?? target.byPhase[0];
 			return `${range(forPhase.min, forPhase.max)} min`;
 		}
 		case "rounds":

@@ -30,8 +30,8 @@ export type NewSet = Omit<SetRecord, "id" | "sessionId">;
 
 type ExerciseLoggerProps = {
 	exercise: Exercise;
-	/** Which prescription column this phase reads. Bridge until E3. */
-	slot: number;
+	/** The phase's position, for a target written per phase. */
+	phaseOrder: number;
 	targetSets: Range | null;
 	targetRir: Range;
 	decision: ProgressionDecision;
@@ -51,7 +51,7 @@ const TONE_TEXT = {
 
 export function ExerciseLogger({
 	exercise,
-	slot,
+	phaseOrder,
 	targetSets,
 	targetRir,
 	decision,
@@ -243,7 +243,7 @@ export function ExerciseLogger({
 					</ul>
 					<p className="mt-2 text-[0.6875rem] text-faint">
 						{working.length} de {targetSets ? targetSets.max : "—"} series de
-						trabajo · {formatTarget(exercise.target, slot)}
+						trabajo · {formatTarget(exercise.target, phaseOrder)}
 						{exercise.load.startKg !== null
 							? ` · inicio ${formatLoad(exercise.load.startKg, exercise.load.perSide)}`
 							: ""}

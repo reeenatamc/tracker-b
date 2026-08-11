@@ -42,6 +42,9 @@ const COLLECTIONS = new Set([
 	"progressChecks",
 	"inspo",
 	"phaseEvents",
+	"prescriptionBaseline",
+	"planAdjustments",
+	"planSnapshots",
 ]);
 
 let ready: Promise<void> | null = null;

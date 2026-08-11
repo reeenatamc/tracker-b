@@ -80,6 +80,9 @@ const KEYS = [
 	"progressChecks",
 	"inspo",
 	"phaseEvents",
+	"prescriptionBaseline",
+	"planAdjustments",
+	"planSnapshots",
 ] as const;
 
 function makeCollections(seed: Partial<Record<string, Row[]>> = {}) {
@@ -161,7 +164,7 @@ describe("ida y vuelta", () => {
 		expect(filename).toBe("operacion-tesis-2026-08-11.json");
 	});
 
-	it("lleva las ocho colecciones, no sólo las que se usan a diario", async () => {
+	it("lleva todas las colecciones, no sólo las que se usan a diario", async () => {
 		const source = makeCollections({
 			sessions: [SESSION],
 			sets: [SET],
@@ -175,6 +178,11 @@ describe("ida y vuelta", () => {
 			// The phase log has to travel too: restored without it, every date would
 			// fall back to the first phase and the history would quietly relabel.
 			phaseEvents: [PHASE_EVENT],
+			// And the plan, in its three parts. A backup without the snapshots would
+			// restore sessions whose prescription nobody could ever recover.
+			prescriptionBaseline: [{ id: "slot_full_body_a_01", sets: 2 }],
+			planAdjustments: [{ id: "adj-1", entryId: "slot_full_body_a_01" }],
+			planSnapshots: [{ id: "snap-1", sessionId: SESSION.id, entries: [] }],
 		});
 
 		const { blob } = await exportBackup(source, "2026-08-11");

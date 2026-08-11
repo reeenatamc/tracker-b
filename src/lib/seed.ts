@@ -249,5 +249,8 @@ function syncSeedSession(
 		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
+		// La sesión base viene del Excel: es anterior a E3 por definición.
+		prescriptionContract: "legacy",
+		snapshotId: null,
 	});
 }

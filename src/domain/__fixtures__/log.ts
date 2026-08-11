@@ -274,6 +274,8 @@ export const SESSIONS: readonly SessionRecord[] = [
 	endedAt: null,
 	skippedExerciseIds: [],
 	extraExerciseIds: [],
+	prescriptionContract: "legacy" as const,
+	snapshotId: null,
 }));
 
 const WEEKLY: ReadonlyArray<[load: number, results: Array<[number, number]>]> =

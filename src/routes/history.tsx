@@ -15,17 +15,18 @@ import { PageHeader, TabBar } from "@/components/TabBar";
 import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import { displayName } from "@/domain/exercise-ids";
-import { findExercise } from "@/domain/personalise";
+import { findExercise, withPrescription } from "@/domain/personalise";
 import { phaseById, phaseOfSession } from "@/domain/phases";
 import { sessionById } from "@/domain/schedule";
 import type { Exercise, PhaseId, SetRecord } from "@/domain/schema";
+import { activeSnapshot } from "@/domain/snapshot";
 import { program } from "@/lib/content";
 import { formatDate, formatRirSummary, formatSet } from "@/lib/format";
 
 export const Route = createFileRoute("/history")({ component: History });
 
 function History() {
-	const { collections, sessions, sets, overrides, customExercises } =
+	const { collections, sessions, sets, customExercises, planSnapshots } =
 		useRecords();
 
 	const [editing, setEditing] = useState<{
@@ -36,9 +37,21 @@ function History() {
 
 	const ordered = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
 
-	/** Falls back to a permissive placeholder so no set is ever uneditable. */
-	const exerciseFor = (exerciseId: string): Exercise =>
-		findExercise(program.sessions, customExercises, overrides, exerciseId) ?? {
+	/**
+	 * The exercise as that session had it prescribed.
+	 *
+	 * The numbers come from the session's own snapshot, never from today's plan:
+	 * raising the load next week must not rewrite what the editor offers for a set
+	 * logged in September. Falls back to a permissive placeholder so no set is ever
+	 * uneditable.
+	 */
+	const exerciseFor = (exerciseId: string, sessionId: string): Exercise => {
+		const found = findExercise(program.sessions, customExercises, exerciseId);
+		const entry = activeSnapshot(planSnapshots, sessionId)?.entries.find(
+			(candidate) => candidate.exerciseId === exerciseId,
+		);
+		if (found) return entry ? withPrescription(found, entry) : found;
+		return {
 			id: exerciseId,
 			name: displayName(exerciseId),
 			order: 0,
@@ -62,6 +75,7 @@ function History() {
 			technique: "",
 			isAnkle: false,
 		};
+	};
 
 	return (
 		<main className="mx-auto min-h-dvh w-full max-w-lg space-y-3 px-3 pb-[calc(8.5rem+env(safe-area-inset-bottom))]">
@@ -105,7 +119,7 @@ function History() {
 								{[...byExercise].map(([exerciseId, exerciseSets]) => (
 									<li key={exerciseId}>
 										<p className="text-[0.8125rem] text-muted">
-											{exerciseFor(exerciseId).name}
+											{exerciseFor(exerciseId, session.id).name}
 										</p>
 										<div className="mt-1 flex flex-wrap items-center gap-2">
 											{exerciseSets.map((set) => (
@@ -115,7 +129,7 @@ function History() {
 													onClick={() =>
 														setEditing({
 															set,
-															exercise: exerciseFor(exerciseId),
+															exercise: exerciseFor(exerciseId, session.id),
 															phase: session.phase,
 														})
 													}

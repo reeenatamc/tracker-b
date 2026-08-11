@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnkleRouteImport } from './routes/ankle'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as InspoRouteImport } from './routes/inspo'
+import { Route as PlanRouteImport } from './routes/plan'
 import { Route as ProgressRouteImport } from './routes/progress'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,6 +36,11 @@ const InspoRoute = InspoRouteImport.update({
   path: '/inspo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanRoute = PlanRouteImport.update({
+  id: '/plan',
+  path: '/plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProgressRoute = ProgressRouteImport.update({
   id: '/progress',
   path: '/progress',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
   '/inspo': typeof InspoRoute
+  '/plan': typeof PlanRoute
   '/progress': typeof ProgressRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
   '/inspo': typeof InspoRoute
+  '/plan': typeof PlanRoute
   '/progress': typeof ProgressRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,16 @@ export interface FileRoutesById {
   '/ankle': typeof AnkleRoute
   '/history': typeof HistoryRoute
   '/inspo': typeof InspoRoute
+  '/plan': typeof PlanRoute
   '/progress': typeof ProgressRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/ankle' | '/history' | '/inspo' | '/progress'
+  fullPaths: '/' | '/ankle' | '/history' | '/inspo' | '/plan' | '/progress'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/ankle' | '/history' | '/inspo' | '/progress'
-  id: '__root__' | '/' | '/ankle' | '/history' | '/inspo' | '/progress'
+  to: '/' | '/ankle' | '/history' | '/inspo' | '/plan' | '/progress'
+  id:
+    '__root__' | '/' | '/ankle' | '/history' | '/inspo' | '/plan' | '/progress'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +86,7 @@ export interface RootRouteChildren {
   AnkleRoute: typeof AnkleRoute
   HistoryRoute: typeof HistoryRoute
   InspoRoute: typeof InspoRoute
+  PlanRoute: typeof PlanRoute
   ProgressRoute: typeof ProgressRoute
 }
 
@@ -109,6 +120,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InspoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/plan': {
+      id: '/plan'
+      path: '/plan'
+      fullPath: '/plan'
+      preLoaderRoute: typeof PlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/progress': {
       id: '/progress'
       path: '/progress'
@@ -124,6 +142,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnkleRoute: AnkleRoute,
   HistoryRoute: HistoryRoute,
   InspoRoute: InspoRoute,
+  PlanRoute: PlanRoute,
   ProgressRoute: ProgressRoute,
 }
 export const routeTree = rootRouteImport

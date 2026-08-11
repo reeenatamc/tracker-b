@@ -35,6 +35,9 @@ const COLLECTION_KEYS = [
 	"progressChecks",
 	"inspo",
 	"phaseEvents",
+	"prescriptionBaseline",
+	"planAdjustments",
+	"planSnapshots",
 ] as const;
 
 export type BackupSummary = {

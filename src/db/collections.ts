@@ -22,7 +22,10 @@ import type {
 	ExerciseOverride,
 	InspoItem,
 	PhaseEvent,
+	PlanAdjustment,
+	PrescriptionBaseline,
 	ProgressCheck,
+	SessionPlanSnapshot,
 	SessionRecord,
 	SetRecord,
 } from "@/domain/schema";
@@ -31,7 +34,7 @@ import {
 	type DurabilityTracker,
 	durable,
 } from "./durability";
-import { appendOnly, syncable } from "./synced";
+import { appendOnly, noUpdate, syncable } from "./synced";
 
 const DATABASE_NAME = "operacion-tesis";
 
@@ -158,6 +161,45 @@ async function createCollections() {
 		}),
 	);
 
+	/*
+	 * The three E3 collections.
+	 *
+	 * The baseline is what the program said on day one. Adjustments and snapshots
+	 * only grow: an adjustment is corrected by revoking it from a date, and a
+	 * snapshot is a fact — the wrapper refuses `update` on both.
+	 *
+	 * Deleting is not blanket-forbidden on snapshots, and that is deliberate: a
+	 * reconstructed one is a derivative that regenerates, and an unreferenced one
+	 * may be rubbish from an interrupted session start. `domain/snapshot.ts` owns
+	 * that predicate; here we only stop them being edited.
+	 */
+	const prescriptionBaseline = createCollection(
+		persistedCollectionOptions<PrescriptionBaseline, string>({
+			id: "prescription_baseline",
+			getKey: (entry) => entry.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	const planAdjustments = createCollection(
+		persistedCollectionOptions<PlanAdjustment, string>({
+			id: "plan_adjustments",
+			getKey: (adjustment) => adjustment.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
+	const planSnapshots = createCollection(
+		persistedCollectionOptions<SessionPlanSnapshot, string>({
+			id: "plan_snapshots",
+			getKey: (snapshot) => snapshot.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
 	const raw = {
 		sessions,
 		sets,
@@ -167,6 +209,9 @@ async function createCollections() {
 		progressChecks,
 		inspo,
 		phaseEvents,
+		prescriptionBaseline,
+		planAdjustments,
+		planSnapshots,
 	};
 
 	/**
@@ -200,6 +245,11 @@ async function createCollections() {
 		progressChecks: write(progressChecks),
 		inspo: write(inspo),
 		phaseEvents: appendOnly(write(phaseEvents)),
+		prescriptionBaseline: write(prescriptionBaseline),
+		planAdjustments: appendOnly(write(planAdjustments)),
+		// `noUpdate` rather than `appendOnly`: snapshots may be collected, never
+		// edited. See `domain/snapshot.ts` for when collecting is allowed.
+		planSnapshots: noUpdate(write(planSnapshots)),
 		raw,
 	};
 }

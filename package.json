@@ -21,7 +21,8 @@
     "deploy": "npm run build && node scripts/deploy.mjs",
     "verify:import": "tsx scripts/verify-import.ts",
     "example": "tsx scripts/make-example.ts",
-    "extract:library": "tsx scripts/extract-library.ts"
+    "extract:library": "tsx scripts/extract-library.ts",
+    "verify": "npm test && npm run typecheck && npm run check && npm run build && npm run verify:import"
   },
   "dependencies": {
     "@journeyapps/wa-sqlite": "^1.7.2",

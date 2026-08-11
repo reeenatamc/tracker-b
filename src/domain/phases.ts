@@ -6,14 +6,7 @@
  * would introduce for what is really just a calendar day.
  */
 
-import type {
-	Exercise,
-	LegacyPhaseId,
-	Phase,
-	Program,
-	Range,
-	SetCount,
-} from "./schema";
+import type { Phase, Program, Range, SetCount } from "./schema";
 
 /**
  * The phase in force on a date now comes from the event log, not from a range of
@@ -42,36 +35,14 @@ export function phaseOfSession(
 	return program.phases.find((phase) => phase.id === session.phase) ?? null;
 }
 
-/**
- * Which column of `setsByPhase` a phase reads.
- *
- * Deliberate, temporary scaffolding. Prescription is still indexed by the numeric
- * phase id, and E2 promised not to move prescription — so instead of rekeying it,
- * the number is resolved from the phase's own data. The four original phases carry
- * their `legacyId`; anything created later says where it inherits from.
- *
- * E3 replaces `setsByPhase` with a baseline plus an adjustment log, and this goes
- * with it. It is a bridge, and it is named like one.
+/*
+ * A bridge used to live here that let a phase index a column of the imported
+ * prescription, so E2 could move phases without touching what they prescribed.
+ * E3 replaced that column with a baseline plus an adjustment log, and the bridge
+ * went with it: a phase now gates adjustments and indexes nothing. The last
+ * reader of the old column is the migration, and only the migration — see
+ * `lib/migrate-prescription.ts` and `adjustments.ts`.
  */
-export function slotOf(program: Program, phase: Phase): LegacyPhaseId {
-	const seen = new Set<string>();
-	let cursor: Phase | null = phase;
-
-	while (cursor) {
-		if (cursor.legacyId !== null) return cursor.legacyId;
-		if (seen.has(cursor.id)) break;
-		seen.add(cursor.id);
-		cursor = cursor.inheritsFrom
-			? (program.phases.find((entry) => entry.id === cursor?.inheritsFrom) ??
-				null)
-			: null;
-	}
-
-	throw new Error(
-		`La fase ${phase.id} no dice de dónde saca su prescripción: ` +
-			"necesita legacyId o inheritsFrom.",
-	);
-}
 
 export function phaseById(program: Program, id: string): Phase {
 	const phase = program.phases.find((candidate) => candidate.id === id);
@@ -86,29 +57,9 @@ export function resolveSetCount(count: SetCount): Range | null {
 	return { min: count[0], max: count[1] };
 }
 
-/** How many working sets this exercise gets in this phase. */
-export function targetSets(
-	program: Program,
-	exercise: Exercise,
-	phase: Phase,
-): Range | null {
-	return resolveSetCount(exercise.setsByPhase[slotOf(program, phase)]);
-}
-
 /** Reps in reserve to leave on working sets, per the phase. */
 export function targetRir(phase: Phase): Range {
 	return phase.targetRir;
-}
-
-/** Exercises programmed for this phase, in order. Skips those not yet introduced. */
-export function exercisesForPhase(
-	program: Program,
-	exercises: readonly Exercise[],
-	phase: Phase,
-): Exercise[] {
-	return exercises
-		.filter((exercise) => targetSets(program, exercise, phase) !== null)
-		.sort((a, b) => a.order - b.order);
 }
 
 /** Whole weeks left until the checkpoint, floored at zero. */

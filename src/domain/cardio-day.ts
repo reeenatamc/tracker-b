@@ -19,6 +19,7 @@ import type {
 	Exercise,
 	Phase,
 	PhaseEvent,
+	PrescriptionBaseline,
 	Program,
 	Range,
 } from "./schema";
@@ -94,15 +95,9 @@ export type RehabStage = {
 };
 
 /**
- * The rehab block the calendar has reached.
- *
- * Past the last stage it holds there rather than running out: the protocol ends
- * at six weeks but the ankle does not, and dropping to nothing would quietly
- * stop the one thing with a clinical reason to continue.
- */
-/**
  * The cardio prescription for a phase, following `inheritsFrom` when the phase
- * does not state one of its own. Same bridge as `slotOf`, and it retires with it.
+ * does not state one of its own. Cardio is still written per phase in the
+ * content, so this walk stays: E3 moved strength prescription out, not this.
  */
 function cardioForPhase(
 	program: Program,
@@ -125,6 +120,13 @@ function cardioForPhase(
 	return null;
 }
 
+/**
+ * The rehab block the calendar has reached.
+ *
+ * Past the last stage it holds there rather than running out: the protocol ends
+ * at six weeks but the ankle does not, and dropping to nothing would quietly
+ * stop the one thing with a clinical reason to continue.
+ */
 export function rehabStageFor(
 	program: Program,
 	date: string,
@@ -188,5 +190,43 @@ export function rehabAsExercise(entry: AnkleExercise, order: number): Exercise {
 		substitution: entry.substitution,
 		technique: entry.technique,
 		isAnkle: true,
+	};
+}
+
+/**
+ * And its prescription, in the shape the executor reads since E3.
+ *
+ * Rehab is not in the migrated baseline: it is a clinical protocol indexed by
+ * week, not a slot anybody adjusts. So its rows are built on the spot — but built
+ * as *baseline* rows, so a rehab day freezes its snapshot through exactly the
+ * same path as a strength day rather than round a side door. Marked `rehab_` so
+ * nothing mistakes one for a seeded slot.
+ */
+export function rehabAsEntry(
+	entry: AnkleExercise,
+	templateId: string,
+	order: number,
+): PrescriptionBaseline {
+	const exercise = rehabAsExercise(entry, order);
+	return {
+		id: `rehab_${entry.id}`,
+		templateId,
+		exerciseId: entry.id,
+		order,
+		sets: entry.sets,
+		target: exercise.target,
+		load: exercise.load,
+		rir: null,
+		restSeconds: null,
+		trainingRole: "rehab",
+		goal: entry.goal,
+		progression: entry.progression,
+		cues: entry.technique ? [entry.technique] : [],
+		allowedSubstitutions: entry.substitution
+			? [{ kind: "note", text: entry.substitution }]
+			: [],
+		seededFrom: "ankleRehab",
+		// Not seeded at a moment: derived from the protocol every time it is read.
+		seededAt: 0,
 	};
 }

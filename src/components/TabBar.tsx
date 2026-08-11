@@ -1,5 +1,5 @@
 /**
- * The five places the app goes. Fixed to the bottom, where your thumb is.
+ * The six places the app goes. Fixed to the bottom, where your thumb is.
  */
 
 import { Link } from "@tanstack/react-router";
@@ -9,6 +9,7 @@ import { SyncStatus } from "./SyncStatus";
 
 const TABS = [
 	{ to: "/", label: "Hoy" },
+	{ to: "/plan", label: "Plan" },
 	{ to: "/ankle", label: "Tobillo" },
 	{ to: "/progress", label: "Progreso" },
 	{ to: "/inspo", label: "Inspo" },

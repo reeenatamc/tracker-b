@@ -16,12 +16,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import {
+	buildBaseline,
+	buildPhaseAdjustments,
+} from "@/lib/migrate-prescription";
 import { PHASE_EVENTS } from "./__fixtures__/log";
 import { KNOWN_PHASE_IDS, PHASE_ID_PATTERN } from "./__fixtures__/phase-ids";
 import { PROGRAM } from "./__fixtures__/program";
 import { phaseForDate, projectPhases } from "./phase-events";
 import { validateEvents } from "./phase-events-validate";
-import { slotOf } from "./phases";
+import { resolvePrescription } from "./prescription";
 import { type PhaseEvent, type Program, ProgramFile } from "./schema";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -142,9 +146,24 @@ describe("una fase nueva se crea desde datos, sin tocar código", () => {
 		);
 	});
 
+	/**
+	 * Antes esto lo resolvía `slotOf` al vuelo. Desde E3 la herencia se resuelve
+	 * **una vez, al migrar**: la fase nueva recibe los mismos ajustes que aquella
+	 * de la que hereda, escritos, en vez de deducirlos cada vez que se lee.
+	 */
 	it("hereda la prescripción de la fase de la que dice heredar", () => {
-		const viaje = extended.phases[4];
-		expect(slotOf(extended, viaje)).toBe(slotOf(extended, extended.phases[3]));
+		const baseline = buildBaseline(extended, 0);
+		const adjustments = buildPhaseAdjustments(extended, baseline, 0);
+		const setsIn = (phaseId: string) =>
+			resolvePrescription(
+				baseline,
+				adjustments,
+				extended.sessions[0].id,
+				{ effectiveOn: "2027-02-01", knows: null },
+				() => phaseId,
+			).map((entry) => JSON.stringify(entry.sets));
+
+		expect(setsIn("fase_viaje")).toEqual(setsIn("definicion_tesis"));
 	});
 
 	it("al estar anclada, no se mueve si lo anterior se alarga", () => {

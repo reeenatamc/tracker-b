@@ -1,14 +1,65 @@
+/**
+ * The session list, now that the prescription arrives resolved.
+ *
+ * The interesting change is what is *not* here any more: no `applyOverride`, no
+ * phase indexing a column. This module gets a list of entries and joins it to who
+ * the exercises are. Everything that decides those entries lives in
+ * `prescription.ts`, which is where it can be reasoned about.
+ */
+
 import { describe, expect, it } from "vitest";
-import { makeExercise, PROGRAM } from "./__fixtures__/program";
+import { PROGRAM } from "./__fixtures__/program";
 import {
-	applyOverride,
+	customToExercise,
+	findExercise,
 	resolveSessionExercises,
-	resolveSets,
+	setsOf,
 	skippedExercises,
+	withPrescription,
 } from "./personalise";
-import type { CustomExercise, ExerciseOverride, SessionRecord } from "./schema";
+import type {
+	CustomExercise,
+	PrescriptionEntry,
+	SessionRecord,
+	SetCount,
+} from "./schema";
 
 const template = PROGRAM.sessions[0];
+
+function entry(
+	exerciseId: string,
+	sets: SetCount,
+	order: number,
+	overrides: Partial<PrescriptionEntry> = {},
+): PrescriptionEntry {
+	const source = template.exercises.find((e) => e.id === exerciseId);
+	if (!source) throw new Error(`sin ejercicio ${exerciseId}`);
+	return {
+		id: `slot_${exerciseId}`,
+		templateId: template.id,
+		exerciseId,
+		order,
+		sets,
+		target: source.target,
+		load: source.load,
+		rir: source.rir,
+		restSeconds: source.restSeconds,
+		trainingRole: "strength",
+		goal: source.goal,
+		progression: source.progression,
+		cues: [],
+		allowedSubstitutions: [],
+		...overrides,
+	};
+}
+
+/** What phase 1 of the fixture prescribes: no step-down yet. */
+const PHASE_ONE: PrescriptionEntry[] = [
+	entry("prensa", 2, 3),
+	entry("abduccion", 2, 7),
+	entry("step-down-bajo", null, 8),
+	entry("balance-unilateral", 3, 10),
+];
 
 function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 	return {
@@ -22,75 +73,73 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
+		prescriptionContract: "legacy",
+		snapshotId: null,
 		...overrides,
 	};
 }
 
-function makeOverride(
-	overrides: Partial<ExerciseOverride> = {},
-): ExerciseOverride {
-	return { id: "o1", exerciseId: "jalon-al-pecho", ...overrides };
-}
+const CUSTOM: CustomExercise = {
+	id: "custom-hip-thrust",
+	name: "Hip thrust",
+	target: { kind: "reps", min: 8, max: 12 },
+	load: {
+		startKg: 40,
+		perSide: false,
+		relativeToBase: false,
+		bodyweight: false,
+		needsCalibration: false,
+		incrementKg: 5,
+		raw: "40 kg",
+	},
+	sets: 3,
+	isAnkle: false,
+	progression: "Doble progresión",
+	goal: "Glúteo",
+};
 
-describe("applyOverride", () => {
-	it("leaves the exercise alone when nothing was overridden", () => {
-		const exercise = makeExercise();
-		expect(applyOverride(exercise, undefined)).toBe(exercise);
-	});
+// ------------------------------------------------------------ withPrescription
 
-	it("sets the machine's real increment, which the spreadsheet never stated", () => {
-		const result = applyOverride(
-			makeExercise(),
-			makeOverride({ incrementKg: 5 }),
+describe("withPrescription", () => {
+	const prensa = template.exercises[0];
+
+	it("toma del plan todo lo que el plan decide", () => {
+		const result = withPrescription(
+			prensa,
+			entry("prensa", 3, 1, {
+				load: { ...prensa.load, startKg: 40, incrementKg: 5 },
+				rir: { min: 1, max: 2 },
+				restSeconds: { min: 120, max: 120 },
+			}),
 		);
-		expect(result.load.incrementKg).toBe(5);
-		expect(result.load.startKg).toBe(20); // untouched
+
+		expect(result.load).toMatchObject({ startKg: 40, incrementKg: 5 });
+		expect(result.rir).toEqual({ min: 1, max: 2 });
+		expect(result.restSeconds).toEqual({ min: 120, max: 120 });
 	});
 
-	it("narrows the rep range", () => {
-		const result = applyOverride(
-			makeExercise(),
-			makeOverride({ repMin: 8, repMax: 10 }),
+	it("y del ejercicio todo lo que es del movimiento", () => {
+		const result = withPrescription(prensa, entry("prensa", 3, 1));
+		expect(result.name).toBe(prensa.name);
+		expect(result.muscle).toBe(prensa.muscle);
+		expect(result.isAnkle).toBe(prensa.isAnkle);
+	});
+
+	it("una señal escrita para esta prescripción gana a la de la biblioteca", () => {
+		const result = withPrescription(
+			prensa,
+			entry("prensa", 3, 1, { cues: ["rodillas fuera"] }),
 		);
-		expect(result.target).toMatchObject({ kind: "reps", min: 8, max: 10 });
-	});
-
-	it("keeps the other end of the range when only one is given", () => {
-		const result = applyOverride(makeExercise(), makeOverride({ repMax: 15 }));
-		expect(result.target).toMatchObject({ min: 10, max: 15 });
-	});
-
-	it("clears the calibrate flag once you set a real starting load", () => {
-		const needsCalibration = makeExercise({
-			load: { ...makeExercise().load, startKg: null, needsCalibration: true },
-		});
-		const result = applyOverride(
-			needsCalibration,
-			makeOverride({ startKg: 35 }),
-		);
-		expect(result.load).toMatchObject({ startKg: 35, needsCalibration: false });
-	});
-
-	it("does not touch a rep range on a timed exercise", () => {
-		const balance = PROGRAM.sessions[0].exercises[3];
-		const result = applyOverride(
-			balance,
-			makeOverride({ repMin: 5, repMax: 9 }),
-		);
-		expect(result.target).toEqual(balance.target);
+		expect(result.technique).toBe("rodillas fuera");
 	});
 });
 
-describe("resolveSessionExercises", () => {
-	const base = {
-		program: PROGRAM,
-		template,
-		phase: PROGRAM.phases[0],
-		overrides: [],
-		customExercises: [],
-	};
+// ----------------------------------------------------- resolveSessionExercises
 
-	it("returns what the phase programs when nothing is personalised", () => {
+describe("resolveSessionExercises", () => {
+	const base = { template, entries: PHASE_ONE, customExercises: [] };
+
+	it("devuelve lo que el plan prescribe hoy, en orden", () => {
 		const list = resolveSessionExercises({ ...base, session: null });
 		expect(list.map((e) => e.id)).toEqual([
 			"prensa",
@@ -99,7 +148,12 @@ describe("resolveSessionExercises", () => {
 		]);
 	});
 
-	it("drops the exercises you skipped today", () => {
+	it("omite un hueco sin series: todavía no está introducido", () => {
+		const list = resolveSessionExercises({ ...base, session: null });
+		expect(list.map((e) => e.id)).not.toContain("step-down-bajo");
+	});
+
+	it("quita lo que saltaste hoy", () => {
 		const list = resolveSessionExercises({
 			...base,
 			session: makeSession({ skippedExerciseIds: ["prensa"] }),
@@ -107,114 +161,91 @@ describe("resolveSessionExercises", () => {
 		expect(list.map((e) => e.id)).not.toContain("prensa");
 	});
 
-	it("adds the custom exercises you pulled in, after the programmed ones", () => {
-		const custom: CustomExercise = {
-			id: "custom-hip-thrust",
-			name: "Hip thrust",
-			target: { kind: "reps", min: 8, max: 12 },
-			load: {
-				startKg: 40,
-				perSide: false,
-				relativeToBase: false,
-				bodyweight: false,
-				needsCalibration: false,
-				incrementKg: 5,
-				raw: "40 kg",
-			},
-			sets: 3,
-			isAnkle: false,
-			progression: "Doble progresión",
-			goal: "Glúteo",
-		};
+	it("añade lo que metiste tú, detrás de lo programado", () => {
 		const list = resolveSessionExercises({
 			...base,
-			customExercises: [custom],
-			session: makeSession({ extraExerciseIds: [custom.id] }),
+			customExercises: [CUSTOM],
+			session: makeSession({ extraExerciseIds: [CUSTOM.id] }),
 		});
-		expect(list.at(-1)?.id).toBe("custom-hip-thrust");
+		expect(list.at(-1)?.id).toBe(CUSTOM.id);
 	});
 
-	it("applies overrides to custom exercises too", () => {
-		const custom: CustomExercise = {
-			id: "custom-x",
-			name: "X",
-			target: { kind: "reps", min: 8, max: 12 },
-			load: {
-				startKg: 10,
-				perSide: false,
-				relativeToBase: false,
-				bodyweight: false,
-				needsCalibration: false,
-				incrementKg: null,
-				raw: "",
-			},
-			sets: 2,
-			isAnkle: false,
-			progression: "",
-			goal: "",
-		};
+	/**
+	 * Un hueco cuyo ejercicio ya no está en la plantilla no revienta la pantalla.
+	 * Puede pasar reordenando contenido, y quedarse sin sesión sería peor.
+	 */
+	it("ignora un hueco que apunta a un ejercicio que no está", () => {
 		const list = resolveSessionExercises({
 			...base,
-			customExercises: [custom],
-			overrides: [makeOverride({ exerciseId: "custom-x", incrementKg: 2.5 })],
-			session: makeSession({ extraExerciseIds: ["custom-x"] }),
+			entries: [
+				...PHASE_ONE,
+				entry("prensa", 2, 99, { exerciseId: "fantasma" }),
+			],
+			session: null,
 		});
-		expect(list.at(-1)?.load.incrementKg).toBe(2.5);
+		expect(list).toHaveLength(3);
 	});
 
-	it("still omits exercises not yet introduced in this phase", () => {
-		const list = resolveSessionExercises({ ...base, session: null });
-		expect(list.map((e) => e.id)).not.toContain("step-down-bajo");
+	it("un ejercicio reordenado por el plan se coloca donde dice el plan", () => {
+		const list = resolveSessionExercises({
+			...base,
+			entries: [entry("prensa", 2, 99), entry("abduccion", 2, 1)],
+			session: null,
+		});
+		expect(list.map((e) => e.id)).toEqual(["abduccion", "prensa"]);
 	});
 });
 
-describe("resolveSets", () => {
-	const prensa = template.exercises[0];
+// ------------------------------------------------------------------- setsOf
 
-	it("uses the phase prescription by default", () => {
-		expect(resolveSets(PROGRAM, prensa, PROGRAM.phases[0], undefined)).toEqual({
-			min: 2,
-			max: 2,
-		});
-		expect(resolveSets(PROGRAM, prensa, PROGRAM.phases[3], undefined)).toEqual({
-			min: 2,
-			max: 3,
-		});
+describe("setsOf", () => {
+	it("un número es un rango de un punto", () => {
+		expect(setsOf(entry("prensa", 2, 1))).toEqual({ min: 2, max: 2 });
 	});
 
-	it("lets you pin a set count yourself", () => {
-		expect(
-			resolveSets(
-				PROGRAM,
-				prensa,
-				PROGRAM.phases[0],
-				makeOverride({ setsOverride: 4 }),
-			),
-		).toEqual({
-			min: 4,
-			max: 4,
-		});
+	it("un rango conserva las dos puntas", () => {
+		expect(setsOf(entry("prensa", [2, 3], 1))).toEqual({ min: 2, max: 3 });
 	});
 
-	it("is null for an exercise the phase does not program", () => {
-		expect(
-			resolveSets(PROGRAM, template.exercises[2], PROGRAM.phases[0], undefined),
-		).toBeNull();
+	it("sin series es null", () => {
+		expect(setsOf(entry("prensa", null, 1))).toBeNull();
+	});
+
+	it("y sin hueco también", () => {
+		expect(setsOf(undefined)).toBeNull();
 	});
 });
+
+// ---------------------------------------------------------- skippedExercises
 
 describe("skippedExercises", () => {
-	it("lists what you skipped, so it can be put back", () => {
-		const session = makeSession({
-			skippedExerciseIds: ["prensa", "step-down-bajo"],
-		});
-		const list = skippedExercises(
-			PROGRAM,
+	it("lista lo saltado, para poder reponerlo", () => {
+		const list = skippedExercises({
 			template,
-			PROGRAM.phases[0],
-			session,
-		);
-		// step-down is not programmed in phase 1, so it is not offered back.
+			entries: PHASE_ONE,
+			session: makeSession({
+				skippedExerciseIds: ["prensa", "step-down-bajo"],
+			}),
+		});
+		// El step-down no está prescrito todavía, así que no se ofrece de vuelta.
 		expect(list.map((e) => e.id)).toEqual(["prensa"]);
+	});
+});
+
+// -------------------------------------------------------------- findExercise
+
+describe("findExercise", () => {
+	it("encuentra uno programado, tal cual", () => {
+		const found = findExercise(PROGRAM.sessions, [], "prensa");
+		expect(found?.name).toBe("Prensa");
+	});
+
+	it("y uno tuyo", () => {
+		const found = findExercise(PROGRAM.sessions, [CUSTOM], CUSTOM.id);
+		expect(found).toEqual(customToExercise(CUSTOM, 0));
+	});
+
+	it("null si no está en ninguna parte", () => {
+		expect(findExercise(PROGRAM.sessions, [], "no_existe")).toBeNull();
 	});
 });

@@ -14,7 +14,10 @@ import type {
 	ExerciseOverride,
 	InspoItem,
 	PhaseEvent,
+	PlanAdjustment,
+	PrescriptionBaseline,
 	ProgressCheck,
+	SessionPlanSnapshot,
 	SessionRecord,
 	SetRecord,
 } from "@/domain/schema";
@@ -60,6 +63,15 @@ export function useRecords() {
 	const { data: phaseEvents = [] } = useLiveQuery((q) =>
 		q.from({ p: collections.phaseEvents }),
 	);
+	const { data: prescriptionBaseline = [] } = useLiveQuery((q) =>
+		q.from({ b: collections.prescriptionBaseline }),
+	);
+	const { data: planAdjustments = [] } = useLiveQuery((q) =>
+		q.from({ a: collections.planAdjustments }),
+	);
+	const { data: planSnapshots = [] } = useLiveQuery((q) =>
+		q.from({ s: collections.planSnapshots }),
+	);
 
 	return {
 		collections,
@@ -71,5 +83,8 @@ export function useRecords() {
 		progressChecks: alive(progressChecks) as ProgressCheck[],
 		inspo: alive(inspo) as InspoItem[],
 		phaseEvents: alive(phaseEvents) as PhaseEvent[],
+		prescriptionBaseline: alive(prescriptionBaseline) as PrescriptionBaseline[],
+		planAdjustments: alive(planAdjustments) as PlanAdjustment[],
+		planSnapshots: alive(planSnapshots) as SessionPlanSnapshot[],
 	};
 }

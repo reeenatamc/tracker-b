@@ -1,58 +1,49 @@
 /**
- * Your edits, merged over the imported program.
+ * The session as it is actually going to be performed.
  *
- * The YAML in `content/` is the baseline and stays untouched, so re-running the
- * spreadsheet import never wipes what you changed here. Overrides state only the
- * fields you actually edited; everything else falls through to the program.
+ * Since E3 the prescription does not come from the content any more. It comes
+ * from a resolved `PrescriptionEntry` per slot — the baseline with the adjustment
+ * log folded over it, or, once a session has started, the snapshot that froze
+ * that fold. What is left here is joining that to who the exercise *is*: name,
+ * muscle, whether it is ankle work, which still come from the library.
+ *
+ * What is gone: the phase indexing a column of the spreadsheet. A phase gates
+ * adjustments now, and nothing else. That was the whole point of E3, and the
+ * bridge that faked it through E2 went with it.
  */
 
-import { slotOf } from "./phases";
 import type {
 	CustomExercise,
 	Exercise,
-	ExerciseOverride,
-	Phase,
-	Program,
+	PrescriptionEntry,
 	Range,
 	SessionRecord,
 	SessionTemplate,
 } from "./schema";
 
-/** Applies your overrides to one exercise. */
-export function applyOverride(
+/**
+ * Who the exercise is, prescribing what the plan currently says.
+ *
+ * Everything the plan can decide comes from the entry; everything about the
+ * movement itself stays as the library composed it. `setsByPhase` is left as
+ * content wrote it and is never read — see the structural test.
+ */
+export function withPrescription(
 	exercise: Exercise,
-	override: ExerciseOverride | undefined,
+	entry: PrescriptionEntry,
 ): Exercise {
-	if (!override) return exercise;
-
-	const target =
-		(exercise.target.kind === "reps" ||
-			exercise.target.kind === "repsPerSide") &&
-		(override.repMin != null || override.repMax != null)
-			? {
-					...exercise.target,
-					min: override.repMin ?? exercise.target.min,
-					max: override.repMax ?? exercise.target.max,
-				}
-			: exercise.target;
-
 	return {
 		...exercise,
-		target,
-		load: {
-			...exercise.load,
-			startKg:
-				override.startKg !== undefined
-					? override.startKg
-					: exercise.load.startKg,
-			incrementKg:
-				override.incrementKg !== undefined
-					? override.incrementKg
-					: exercise.load.incrementKg,
-			// An explicit starting load means it no longer needs finding.
-			needsCalibration:
-				override.startKg != null ? false : exercise.load.needsCalibration,
-		},
+		order: entry.order,
+		target: entry.target,
+		load: entry.load,
+		rir: entry.rir,
+		restSeconds: entry.restSeconds,
+		goal: entry.goal || exercise.goal,
+		progression: entry.progression || exercise.progression,
+		// The prescription's own cue wins over the library's general one: it was
+		// written for this exposure.
+		technique: entry.cues[0] ?? exercise.technique,
 	};
 }
 
@@ -87,107 +78,94 @@ export function customToExercise(
 }
 
 export type ResolveInput = {
-	program: Program;
 	template: SessionTemplate;
-	phase: Phase;
-	overrides: readonly ExerciseOverride[];
+	/** The prescription in force, already resolved. One per slot. */
+	entries: readonly PrescriptionEntry[];
 	customExercises: readonly CustomExercise[];
 	session: SessionRecord | null;
 };
 
 /**
- * The exercise list actually shown for a session: programmed for this phase,
- * minus what you skipped, plus what you added, with your overrides applied.
+ * The exercise list actually shown for a session: what the plan prescribes today,
+ * minus what you skipped, plus what you added.
+ *
+ * Skipping and adding are **deviations**, recorded on the session — they are what
+ * happened, not a change of plan. Nothing here writes an adjustment.
  */
 export function resolveSessionExercises({
-	program,
 	template,
-	phase,
-	overrides,
+	entries,
 	customExercises,
 	session,
 }: ResolveInput): Exercise[] {
-	const byExerciseId = new Map(overrides.map((o) => [o.exerciseId, o]));
 	const skipped = new Set(session?.skippedExerciseIds ?? []);
 	const extras = new Set(session?.extraExerciseIds ?? []);
+	const byExerciseId = new Map(template.exercises.map((e) => [e.id, e]));
 
-	const programmed = template.exercises
-		.filter((exercise) => setsFor(program, exercise, phase) !== null)
-		.filter((exercise) => !skipped.has(exercise.id))
-		.map((exercise) => applyOverride(exercise, byExerciseId.get(exercise.id)));
+	const programmed = entries
+		// A slot with no sets is not programmed yet — step-downs before the phase
+		// that introduces them.
+		.filter((entry) => entry.sets !== null)
+		.filter((entry) => !skipped.has(entry.exerciseId))
+		.flatMap((entry) => {
+			const exercise = byExerciseId.get(entry.exerciseId);
+			return exercise ? [withPrescription(exercise, entry)] : [];
+		});
 
 	const added = customExercises
 		.filter((custom) => extras.has(custom.id))
-		.map((custom, index) => customToExercise(custom, 100 + index))
-		.map((exercise) => applyOverride(exercise, byExerciseId.get(exercise.id)));
+		.map((custom, index) => customToExercise(custom, 100 + index));
 
 	return [...programmed, ...added].sort((a, b) => a.order - b.order);
 }
 
-/**
- * Working sets for a phase, honouring a manual override. Returned as a range so
- * a "2–3" prescription keeps both ends.
- */
-export function resolveSets(
-	program: Program,
-	exercise: Exercise,
-	phase: Phase,
-	override: ExerciseOverride | undefined,
-): Range | null {
-	if (override?.setsOverride != null) {
-		return { min: override.setsOverride, max: override.setsOverride };
+/** Working sets, as a range so a "2–3" prescription keeps both ends. */
+export function setsOf(entry: PrescriptionEntry | undefined): Range | null {
+	if (!entry || entry.sets === null) return null;
+	if (typeof entry.sets === "number") {
+		return { min: entry.sets, max: entry.sets };
 	}
-	const count = setsFor(program, exercise, phase);
-	if (count === null) return null;
-	if (typeof count === "number") return { min: count, max: count };
-	return { min: count[0], max: count[1] };
+	return { min: entry.sets[0], max: entry.sets[1] };
 }
 
-/**
- * The prescription is still indexed by the numeric phase id, so the slot is
- * resolved from the phase's own data rather than rekeying the content. Bridge
- * until E3 — see `slotOf`.
- */
-function setsFor(program: Program, exercise: Exercise, phase: Phase) {
-	return exercise.setsByPhase[slotOf(program, phase)];
-}
-
-/** Exercises programmed for the phase that you skipped — offered to put back. */
-export function skippedExercises(
-	program: Program,
-	template: SessionTemplate,
-	phase: Phase,
-	session: SessionRecord | null,
-): Exercise[] {
+/** Prescribed today but skipped — offered to put back. */
+export function skippedExercises({
+	template,
+	entries,
+	session,
+}: Omit<ResolveInput, "customExercises">): Exercise[] {
 	const skipped = new Set(session?.skippedExerciseIds ?? []);
-	return template.exercises.filter(
-		(exercise) =>
-			skipped.has(exercise.id) && setsFor(program, exercise, phase) !== null,
-	);
+	const byExerciseId = new Map(template.exercises.map((e) => [e.id, e]));
+
+	return entries
+		.filter((entry) => entry.sets !== null && skipped.has(entry.exerciseId))
+		.flatMap((entry) => {
+			const exercise = byExerciseId.get(entry.exerciseId);
+			return exercise ? [withPrescription(exercise, entry)] : [];
+		});
 }
 
 /**
- * Finds an exercise anywhere it might be defined — the program's sessions, or
- * the ones you added yourself — with your overrides applied.
+ * Finds an exercise anywhere it might be defined — the program's sessions, or the
+ * ones you added yourself.
  *
  * History needs this: a set logged three weeks ago still has to be editable, and
  * the editor needs the exercise's rep range and increment to do anything useful.
+ * The prescription it had that day comes from that session's snapshot, not from
+ * here, so this deliberately applies nothing on top.
  */
 export function findExercise(
 	sessions: readonly SessionTemplate[],
 	customExercises: readonly CustomExercise[],
-	overrides: readonly ExerciseOverride[],
 	exerciseId: string,
 ): Exercise | null {
-	const override = overrides.find((o) => o.exerciseId === exerciseId);
-
 	for (const session of sessions) {
 		const match = session.exercises.find(
 			(exercise) => exercise.id === exerciseId,
 		);
-		if (match) return applyOverride(match, override);
+		if (match) return match;
 	}
 
 	const custom = customExercises.find((exercise) => exercise.id === exerciseId);
-	return custom ? applyOverride(customToExercise(custom, 0), override) : null;
+	return custom ? customToExercise(custom, 0) : null;
 }

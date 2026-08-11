@@ -648,6 +648,220 @@ export const ProgramFile = Program.omit({ sessions: true }).extend({
 });
 export type ProgramFile = z.infer<typeof ProgramFile>;
 
+// ------------------------------------------------------------- prescription
+
+/**
+ * The longitudinal identity of a *slot*, not of an exercise.
+ *
+ * The third slot of Full Body A can go from leg press to hack squat, and "what
+ * has been in that slot" has to survive the change — the same argument that
+ * stopped exercises being identified by their name in E1. So the exercise is a
+ * field of the slot, never its name.
+ *
+ * Two sources, and only one can live in a fixture. Seeded slots come from the
+ * migration and look like `slot_full_body_a_03`. Slots created from the app with
+ * `add_entry` are opaque UUIDs: they are made on a phone with no network, maybe
+ * at the same moment as the laptop, so they cannot depend on a compiled list.
+ */
+export const PrescriptionEntryId = z.string().min(1);
+export type PrescriptionEntryId = z.infer<typeof PrescriptionEntryId>;
+
+/** What a slot prescribes. The shape both the baseline and a snapshot carry. */
+export const PrescriptionEntry = z.object({
+	id: PrescriptionEntryId,
+	templateId: z.string().min(1),
+	/** Who occupies the slot. Changeable; not identity. */
+	exerciseId: z.string().min(1),
+	order: z.number().int().positive(),
+
+	sets: SetCount,
+	target: Target,
+	load: Load,
+	rir: Range.nullable().default(null),
+	restSeconds: Range.nullable().default(null),
+	trainingRole: TrainingRole,
+	goal: z.string().default(""),
+	progression: z.string().default(""),
+	cues: z.array(z.string()).default([]),
+	allowedSubstitutions: z.array(SubstitutionRef).default([]),
+});
+export type PrescriptionEntry = z.infer<typeof PrescriptionEntry>;
+
+/** The starting state of every slot. Seeded once; never rewritten. */
+export const PrescriptionBaseline = PrescriptionEntry.extend({
+	seededFrom: z.string().default(""),
+	seededAt: z.number(),
+});
+export type PrescriptionBaseline = z.infer<typeof PrescriptionBaseline>;
+
+/**
+ * Changing one field. A discriminated union rather than `field` + `unknown`, so
+ * the relation between the two survives into the type and into Zod.
+ */
+export const FieldChange = z.discriminatedUnion("field", [
+	z.object({ field: z.literal("sets"), value: SetCount }),
+	z.object({ field: z.literal("target"), value: Target }),
+	z.object({ field: z.literal("load"), value: Load }),
+	z.object({ field: z.literal("rir"), value: Range.nullable() }),
+	z.object({ field: z.literal("restSeconds"), value: Range.nullable() }),
+	z.object({ field: z.literal("trainingRole"), value: TrainingRole }),
+	z.object({ field: z.literal("cues"), value: z.array(z.string()) }),
+	z.object({
+		field: z.literal("allowedSubstitutions"),
+		value: z.array(SubstitutionRef),
+	}),
+	z.object({ field: z.literal("goal"), value: z.string() }),
+	z.object({ field: z.literal("progression"), value: z.string() }),
+	z.object({ field: z.literal("order"), value: z.number().int().positive() }),
+]);
+export type FieldChange = z.infer<typeof FieldChange>;
+
+export const AdjustmentOrigin = z.enum([
+	"program",
+	"review",
+	"coach",
+	"manual",
+	"safety",
+]);
+export type AdjustmentOrigin = z.infer<typeof AdjustmentOrigin>;
+
+/** Where the adjustment came from, and which of it is an assumption. */
+export const Provenance = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("authored") }),
+	z.object({
+		kind: z.literal("migrated"),
+		from: z.enum(["setsByPhase", "exerciseOverride"]),
+		/** The effective date did not come from the data: the migration set it. */
+		assumedEffectiveOn: z.boolean(),
+	}),
+]);
+export type Provenance = z.infer<typeof Provenance>;
+
+/**
+ * What happens to a live safety adjustment when the slot's exercise is replaced.
+ *
+ * Never carried over silently: moving an alarm to a different movement would
+ * assert something nobody checked, and dropping it would assert the opposite.
+ * Both are decisions, so both are asked for — and the referenced adjustments must
+ * already exist and be persisted before the replacement is written.
+ */
+export const SafetyResolution = z.object({
+	safetyAdjustmentIds: z.array(z.string()).min(1),
+	decision: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("keep") }),
+		z.object({
+			kind: z.literal("reformulate"),
+			replacementAdjustmentId: z.string().min(1),
+		}),
+		z.object({
+			kind: z.literal("revoke"),
+			revocationAdjustmentId: z.string().min(1),
+		}),
+	]),
+	reason: z.string().min(1),
+});
+export type SafetyResolution = z.infer<typeof SafetyResolution>;
+
+const AdjustmentBase = {
+	id: z.string().min(1),
+	/**
+	 * The date it applies from. Mandatory on every adjustment: one is a state that
+	 * lasts, and a state with no start cannot be resolved.
+	 */
+	effectiveOn: IsoDate,
+	/** Extra gate: only while in that phase. Never retroactive by itself. */
+	onlyInPhase: PhaseId.nullable().default(null),
+	origin: AdjustmentOrigin,
+	/** Non-empty. An adjustment with no reason is a number with no owner. */
+	reason: z.string().min(1),
+	evidenceIds: z.array(z.string()).default([]),
+	provenance: Provenance.default({ kind: "authored" }),
+	/** For ordering on screen and for audit. Never for deciding. */
+	createdAt: z.number(),
+};
+
+export const PlanAdjustment = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("set_field"),
+		entryId: PrescriptionEntryId,
+		change: FieldChange,
+		...AdjustmentBase,
+	}),
+	/** The slot gets a different occupant, with its whole prescription. */
+	z.object({
+		kind: z.literal("replace_exercise"),
+		entryId: PrescriptionEntryId,
+		entry: PrescriptionEntry.omit({ id: true, templateId: true }),
+		safetyResolution: SafetyResolution.nullable().default(null),
+		...AdjustmentBase,
+	}),
+	z.object({
+		kind: z.literal("add_entry"),
+		entry: PrescriptionEntry,
+		...AdjustmentBase,
+	}),
+	z.object({
+		kind: z.literal("remove_entry"),
+		entryId: PrescriptionEntryId,
+		...AdjustmentBase,
+	}),
+	/**
+	 * That adjustment stops applying **from `effectiveOn` onwards**. It does not
+	 * erase it from the dates on which it did apply.
+	 *
+	 * May not point at another revocation: chaining negations would make "what
+	 * held on 25 October?" depend on counting them.
+	 */
+	z.object({
+		kind: z.literal("revoke"),
+		revokesId: z.string().min(1),
+		...AdjustmentBase,
+	}),
+]);
+export type PlanAdjustment = z.infer<typeof PlanAdjustment>;
+
+/** The adjustments a query is allowed to know about. E3 only cuts adjustments. */
+export const PrescriptionKnowledgeCut = z.object({
+	adjustmentIds: z.array(z.string()),
+});
+export type PrescriptionKnowledgeCut = z.infer<typeof PrescriptionKnowledgeCut>;
+
+/**
+ * What a session had prescribed, frozen when it started.
+ *
+ * Self-contained on purpose: it stores resolved values, not references. Revoke
+ * tomorrow the adjustment that made it three sets and Tuesday's session still
+ * says three sets, because it never knew about that adjustment — only the number.
+ * That is the whole of G3.
+ */
+export const SessionPlanSnapshot = z.object({
+	id: z.string().min(1),
+	sessionId: z.string().min(1),
+	takenAt: z.number(),
+	phaseId: PhaseId,
+	entries: z.array(PrescriptionEntry),
+
+	/**
+	 * `committed`     — frozen at session start. An observed fact.
+	 * `reconstructed` — deduced afterwards for a pre-E3 session. A derivative.
+	 *
+	 * "Provisional" is not stored: it is what you observe when no session points
+	 * at a committed snapshot yet. Storing it would need a status transition, and
+	 * that is an update on something that must not take them.
+	 */
+	status: z.enum(["committed", "reconstructed"]),
+	reconstructionConfidence: z
+		.enum(["complete", "partial"])
+		.nullable()
+		.default(null),
+	/** What could not be placed, so "partial" says in what. */
+	reconstructionGaps: z.array(z.string()).default([]),
+
+	/** Which adjustments held. For explaining only; rendering never needs them. */
+	adjustmentIds: z.array(z.string()).default([]),
+});
+export type SessionPlanSnapshot = z.infer<typeof SessionPlanSnapshot>;
+
 // ----------------------------------------------------------------- log records
 
 export const LoadUnit = z.enum(["kg", "bodyweight", "seconds", "minutes"]);
@@ -673,6 +887,22 @@ export const SessionRecord = z.object({
 	skippedExerciseIds: z.array(z.string()).default([]),
 	/** Custom exercises pulled into this session. */
 	extraExerciseIds: z.array(z.string()).default([]),
+	/**
+	 * Which prescription contract this session was created under.
+	 *
+	 * It travels with the row rather than living in a list captured by one device,
+	 * because a pre-E3 session can arrive by sync *after* the receiver migrated —
+	 * and a list would call it corruption. `legacy` is reconstructible;
+	 * `snapshot_v1` without a snapshot is a G3 violation, however many sets it has.
+	 *
+	 * Absent is only `legacy` when the row is demonstrably older than schema 3.
+	 */
+	prescriptionContract: z
+		.enum(["legacy", "snapshot_v1"])
+		.nullable()
+		.default(null),
+	/** The snapshot frozen when this session started. */
+	snapshotId: z.string().nullable().default(null),
 });
 export type SessionRecord = z.infer<typeof SessionRecord>;
 

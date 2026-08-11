@@ -91,10 +91,15 @@ export function highWaterMark(
 
 /**
  * The shape of the data being exchanged. Bumped when a stored record changes in a
- * way an older client cannot read — E2 turned `SessionRecord.phase` from a number
- * into a string, so it went from 1 to 2.
+ * way an older client cannot read. E2 turned `SessionRecord.phase` from a number
+ * into a string (1 → 2); E3 added the prescription contract every session needs
+ * (2 → 3).
+ *
+ * It is stamped on every row as well as sent with the exchange, because a reader
+ * needs to know what a *record* was written under, not just what the peer is
+ * running now.
  */
-export const SYNC_SCHEMA_VERSION = 2;
+export const SYNC_SCHEMA_VERSION = 3;
 
 export type VersionVerdict =
 	| { ok: true }

@@ -10,13 +10,13 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AddExercise } from "@/components/AddExercise";
 import { CardioBlock } from "@/components/CardioBlock";
 import { ExerciseLogger, type NewSet } from "@/components/ExerciseLogger";
 import {
 	ExerciseSettings,
-	type OverrideChanges,
+	type PlanChange,
 } from "@/components/ExerciseSettings";
 import { ExerciseNav, ExerciseStrip } from "@/components/ExerciseStrip";
 import { QuickFinisher } from "@/components/QuickFinisher";
@@ -38,6 +38,7 @@ import {
 import {
 	CARDIO_EXERCISE,
 	cardioFor,
+	rehabAsEntry,
 	rehabAsExercise,
 	rehabStageFor,
 } from "@/domain/cardio-day";
@@ -48,10 +49,11 @@ import {
 } from "@/domain/history";
 import {
 	resolveSessionExercises,
-	resolveSets,
+	setsOf as setsOfEntry,
 	skippedExercises,
 } from "@/domain/personalise";
-import { phaseForDate, slotOf } from "@/domain/phases";
+import { phaseForDate } from "@/domain/phases";
+import { resolvePrescription } from "@/domain/prescription";
 import { decideProgression } from "@/domain/progression";
 import {
 	dayPlanForDate,
@@ -59,7 +61,13 @@ import {
 	sessionForDate,
 	weekdayOf,
 } from "@/domain/schedule";
-import type { CustomExercise, Exercise, SetRecord } from "@/domain/schema";
+import type {
+	CustomExercise,
+	Exercise,
+	PrescriptionEntry,
+	SetRecord,
+} from "@/domain/schema";
+import { activeSnapshot, freeze } from "@/domain/snapshot";
 import { program } from "@/lib/content";
 import { formatDate, formatTarget, todayIso } from "@/lib/format";
 import {
@@ -77,16 +85,17 @@ function Today() {
 		sessions,
 		sets,
 		ankleChecks,
-		overrides,
 		customExercises,
 		phaseEvents,
+		prescriptionBaseline,
+		planAdjustments,
+		planSnapshots,
 	} = useRecords();
 	const rest = useRest();
 	const today = todayIso();
 
 	const phase = phaseForDate(program, phaseEvents, today);
-	// Which prescription column this phase reads. Bridge until E3 — see `slotOf`.
-	const slot = slotOf(program, phase);
+	const phaseAt = (date: string) => phaseForDate(program, phaseEvents, date).id;
 	const dayPlan = dayPlanForDate(program, today);
 	const cardio = cardioFor(program, phaseEvents, today);
 	const rehab = rehabStageFor(program, today);
@@ -129,40 +138,113 @@ function Today() {
 				record.date === today && record.templateId === (template?.id ?? ""),
 		) ?? null;
 
+	/**
+	 * What today prescribes.
+	 *
+	 * Once the session has started this is its snapshot — a stored fact, read back
+	 * rather than recalculated. Only before that is it a fold of the baseline and
+	 * the adjustment log, and that fold is exactly what gets frozen.
+	 *
+	 * Rehab is the one exception: it is a clinical protocol indexed by week, not a
+	 * slot anybody adjusts, so it is built on the spot. See `rehabAsEntry`.
+	 */
+	const snapshot = session ? activeSnapshot(planSnapshots, session.id) : null;
+	const plan = strengthTemplate
+		? { baseline: prescriptionBaseline, adjustments: planAdjustments }
+		: {
+				baseline: (rehab?.exercises ?? []).map((entry, index) =>
+					rehabAsEntry(entry, template?.id ?? "cardio_ankle", index + 1),
+				),
+				adjustments: [],
+			};
+	const livePrescription: PrescriptionEntry[] = template
+		? resolvePrescription(
+				plan.baseline,
+				plan.adjustments,
+				template.id,
+				{ effectiveOn: today, knows: null },
+				phaseAt,
+			)
+		: [];
+	const entries = snapshot ? snapshot.entries : livePrescription;
+	const entryFor = (exerciseId: string) =>
+		entries.find((entry) => entry.exerciseId === exerciseId);
+
 	// The latest ankle check gates progression even when today's pain was 0.
 	const latestCheck =
 		[...ankleChecks].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null;
 
 	/**
-	 * The session a set will hang off. Returns the id and the promise that it
-	 * reached disk — a set whose session never persisted would be an orphan.
+	 * Two quick taps must not start two sessions. The in-flight promise is the
+	 * lock — everyone waits on the same start — and it is keyed by the day so it
+	 * cannot leak into tomorrow.
 	 */
-	function ensureSession(): { id: string; persisted: Promise<unknown> } {
-		if (session) return { id: session.id, persisted: Promise.resolve() };
-		const id = crypto.randomUUID();
-		const transaction = collections.sessions.insert({
-			id,
-			date: today,
-			templateId: template?.id ?? "unscheduled",
-			// The stamp that makes G1 hold: a session records the phase it was in,
-			// and nothing ever derives it again.
-			phase: phase.id,
-			completed: false,
-			notes: null,
-			startedAt: Date.now(),
-			endedAt: null,
-			skippedExerciseIds: [],
-			extraExerciseIds: [],
-		});
-		return { id, persisted: persisted(transaction) };
+	const starting = useRef<{ key: string; id: Promise<string> } | null>(null);
+
+	/**
+	 * The session a set will hang off, started in the order G3 needs.
+	 *
+	 * Snapshot first and awaited, then the session that points at it. If the second
+	 * step fails what is left is an orphan snapshot — recoverable rubbish — instead
+	 * of a session with no plan, which nobody could ever reconstruct: that is the
+	 * whole reason the order is this way round and not the obvious one.
+	 */
+	function ensureSession(): Promise<string> {
+		if (session) return Promise.resolve(session.id);
+
+		const key = `${today}:${template?.id ?? "unscheduled"}`;
+		if (starting.current?.key === key) return starting.current.id;
+
+		const id = startFresh();
+		starting.current = { key, id };
+		return id;
+	}
+
+	async function startFresh(): Promise<string> {
+		const sessionId = crypto.randomUUID();
+		const snapshotId = crypto.randomUUID();
+
+		await persisted(
+			collections.planSnapshots.insert(
+				freeze({
+					id: snapshotId,
+					sessionId,
+					takenAt: Date.now(),
+					phaseId: phase.id,
+					templateId: template?.id ?? "unscheduled",
+					baseline: plan.baseline,
+					adjustments: plan.adjustments,
+					asOf: { effectiveOn: today, knows: null },
+					phaseAt,
+				}),
+			),
+		);
+
+		await persisted(
+			collections.sessions.insert({
+				id: sessionId,
+				date: today,
+				templateId: template?.id ?? "unscheduled",
+				// The stamp that makes G1 hold: a session records the phase it was in,
+				// and nothing ever derives it again.
+				phase: phase.id,
+				completed: false,
+				notes: null,
+				startedAt: Date.now(),
+				endedAt: null,
+				skippedExerciseIds: [],
+				extraExerciseIds: [],
+				prescriptionContract: "snapshot_v1",
+				snapshotId,
+			}),
+		);
+
+		return sessionId;
 	}
 
 	async function beginSession() {
-		const session = ensureSession();
-		await Promise.all([
-			session.persisted,
-			persisted(startSession(collections, session.id, Date.now())),
-		]);
+		const sessionId = await ensureSession();
+		await persisted(startSession(collections, sessionId, Date.now()));
 	}
 
 	async function finishSession() {
@@ -190,16 +272,15 @@ function Today() {
 	}
 
 	async function saveCardio(minutes: number) {
-		const session = ensureSession();
+		const sessionId = await ensureSession();
 		const transaction = collections.sets.insert({
 			id: crypto.randomUUID(),
-			sessionId: session.id,
+			sessionId,
 			exerciseId: "cardio_machine",
 			setNumber:
 				sets.filter(
 					(set) =>
-						set.sessionId === session?.id &&
-						set.exerciseId === "cardio_machine",
+						set.sessionId === sessionId && set.exerciseId === "cardio_machine",
 				).length + 1,
 			isWarmup: false,
 			load: null,
@@ -209,7 +290,7 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
-		await Promise.all([session.persisted, persisted(transaction)]);
+		await persisted(transaction);
 	}
 
 	/**
@@ -221,16 +302,19 @@ function Today() {
 	 * flush, which is milliseconds.
 	 */
 	async function saveSet(newSet: NewSet) {
-		const session = ensureSession();
+		// §7.1 step 4: a session accepts sets only once it and its snapshot are on
+		// disk. Only the first set of a session ever waits for that — after it,
+		// `ensureSession` resolves in a microtask.
+		const sessionId = await ensureSession();
 		const transaction = collections.sets.insert({
 			...newSet,
 			id: crypto.randomUUID(),
-			sessionId: session.id,
+			sessionId,
 		});
 		// The rest timer starts on the write reaching memory, not on the flush: it
 		// is about the muscle, and making it wait on the disk would be a lie in the
 		// other direction.
-		const landed = Promise.all([session.persisted, persisted(transaction)]);
+		const landed = persisted(transaction);
 
 		// Approach sets do not earn a full rest, and timed work is its own timer.
 		if (newSet.isWarmup || newSet.unit === "minutes") {
@@ -250,27 +334,35 @@ function Today() {
 		await landed;
 	}
 
-	function saveOverride(exerciseId: string, changes: OverrideChanges) {
-		const existing = overrides.find((o) => o.exerciseId === exerciseId);
-		if (existing) {
-			collections.overrides.update(existing.id, (draft) =>
-				Object.assign(draft, changes),
-			);
-		} else {
-			collections.overrides.insert({
+	/**
+	 * Changing the plan from the executor.
+	 *
+	 * An adjustment, not an override: it is dated, it carries a reason, and it does
+	 * not touch what any started session already has frozen. Effective from today,
+	 * because a change decided today did not hold last Tuesday.
+	 */
+	async function savePlanChange(entryId: string, change: PlanChange) {
+		await persisted(
+			collections.planAdjustments.insert({
+				kind: "set_field",
 				id: crypto.randomUUID(),
-				exerciseId,
-				...changes,
-			});
-		}
+				entryId,
+				change: change.change,
+				effectiveOn: today,
+				onlyInPhase: null,
+				origin: "manual",
+				reason: change.reason,
+				evidenceIds: [],
+				provenance: { kind: "authored" },
+				createdAt: Date.now(),
+			}),
+		);
 	}
 
+	/** Not doing it today. A deviation on the session — the plan is untouched. */
 	async function skip(exerciseId: string) {
-		const session = ensureSession();
-		await Promise.all([
-			session.persisted,
-			persisted(skipExercise(collections, session.id, exerciseId)),
-		]);
+		const sessionId = await ensureSession();
+		await persisted(skipExercise(collections, sessionId, exerciseId));
 	}
 
 	async function restore(exerciseId: string) {
@@ -280,11 +372,10 @@ function Today() {
 
 	async function addCustomExercise(custom: CustomExercise) {
 		const created = collections.customExercises.insert(custom);
-		const session = ensureSession();
+		const sessionId = await ensureSession();
 		await Promise.all([
-			session.persisted,
 			persisted(created),
-			persisted(addToSession(collections, session.id, custom.id)),
+			persisted(addToSession(collections, sessionId, custom.id)),
 		]);
 	}
 
@@ -292,11 +383,11 @@ function Today() {
 		if (!collections.customExercises.has(custom.id)) {
 			collections.customExercises.insert(custom);
 		}
-		const session = ensureSession();
-		const attached = addToSession(collections, session.id, custom.id);
+		const sessionId = await ensureSession();
+		const attached = addToSession(collections, sessionId, custom.id);
 		const transaction = collections.sets.insert({
 			id: crypto.randomUUID(),
-			sessionId: session.id,
+			sessionId,
 			exerciseId: custom.id,
 			setNumber: 1,
 			isWarmup: false,
@@ -307,25 +398,14 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
-		await Promise.all([
-			session.persisted,
-			persisted(attached),
-			persisted(transaction),
-		]);
+		await Promise.all([persisted(attached), persisted(transaction)]);
 	}
 
 	const exercises = template
-		? resolveSessionExercises({
-				program,
-				template,
-				phase,
-				overrides,
-				customExercises,
-				session,
-			})
+		? resolveSessionExercises({ template, entries, customExercises, session })
 		: [];
 	const putBack = template
-		? skippedExercises(program, template, phase, session)
+		? skippedExercises({ template, entries, session })
 		: [];
 	const done = session
 		? completedExerciseIds(sets, session.id)
@@ -342,13 +422,7 @@ function Today() {
 		? exercises.findIndex((exercise) => exercise.id === current.id)
 		: 0;
 
-	const setsOf = (exercise: Exercise) =>
-		resolveSets(
-			program,
-			exercise,
-			phase,
-			overrides.find((o) => o.exerciseId === exercise.id),
-		);
+	const setsOf = (exercise: Exercise) => setsOfEntry(entryFor(exercise.id));
 
 	const decisionFor = (exercise: Exercise) =>
 		decideProgression({
@@ -513,7 +587,7 @@ function Today() {
 										</h2>
 										<p className="tabular mt-1 text-[0.8125rem] text-muted">
 											{setsOf(current) ? `${setsOf(current)?.max} × ` : ""}
-											{formatTarget(current.target, slot)}
+											{formatTarget(current.target, phase.order)}
 										</p>
 									</div>
 									<button
@@ -528,7 +602,7 @@ function Today() {
 
 								<ExerciseLogger
 									exercise={current}
-									slot={slot}
+									phaseOrder={phase.order}
 									targetSets={setsOf(current)}
 									targetRir={phase.targetRir}
 									decision={decisionFor(current)}
@@ -653,22 +727,18 @@ function Today() {
 			{settingsFor ? (
 				<ExerciseSettings
 					exercise={settingsFor}
+					entry={entryFor(settingsFor.id)}
 					phase={phase}
-					slot={slot}
 					sets={setsOf(settingsFor)}
 					onSave={(changes) => {
-						saveOverride(settingsFor.id, changes);
+						const entry = entryFor(settingsFor.id);
+						if (entry) {
+							for (const change of changes) savePlanChange(entry.id, change);
+						}
 						setSettingsFor(null);
 					}}
 					onSkip={() => {
 						skip(settingsFor.id);
-						setSettingsFor(null);
-					}}
-					onReset={() => {
-						const existing = overrides.find(
-							(o) => o.exerciseId === settingsFor.id,
-						);
-						if (existing) collections.overrides.delete(existing.id);
 						setSettingsFor(null);
 					}}
 					onClose={() => setSettingsFor(null)}
@@ -699,15 +769,12 @@ function Today() {
 				<SessionNotes
 					value={session?.notes ?? ""}
 					onSave={async (notes) => {
-						const session = ensureSession();
-						await Promise.all([
-							session.persisted,
-							persisted(
-								collections.sessions.update(session.id, (draft) => {
-									draft.notes = notes.trim() || null;
-								}),
-							),
-						]);
+						const id = await ensureSession();
+						await persisted(
+							collections.sessions.update(id, (draft) => {
+								draft.notes = notes.trim() || null;
+							}),
+						);
 						setEditingNotes(false);
 					}}
 					onClose={() => setEditingNotes(false)}

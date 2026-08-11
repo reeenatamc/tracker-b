@@ -25,6 +25,8 @@ function session(id: string, date: string): SessionRecord {
 		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
+		prescriptionContract: "legacy" as const,
+		snapshotId: null,
 	};
 }
 

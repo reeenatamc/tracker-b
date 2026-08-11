@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import { PHASE_EVENTS } from "./__fixtures__/log";
 import { PROGRAM } from "./__fixtures__/program";
 import {
-	exercisesForPhase,
 	phaseForDate,
 	resolveSetCount,
 	targetRir,
-	targetSets,
 	weeksUntilCheckpoint,
 } from "./phases";
 
@@ -39,42 +37,12 @@ describe("phaseForDate", () => {
 	});
 });
 
-describe("targetSets", () => {
-	const [prensa, abduccion, stepDown] = PROGRAM.sessions[0].exercises;
-
-	it("gives a main lift 2 sets in phase 1 and 3 in phase 2", () => {
-		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[0])).toEqual({
-			min: 2,
-			max: 2,
-		});
-		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[1])).toEqual({
-			min: 3,
-			max: 3,
-		});
-	});
-
-	it("keeps an accessory at 2 sets in phase 2", () => {
-		expect(targetSets(PROGRAM, abduccion, PROGRAM.phases[1])).toEqual({
-			min: 2,
-			max: 2,
-		});
-	});
-
-	it('reads a "2–3" phase-4 prescription as a range', () => {
-		expect(targetSets(PROGRAM, prensa, PROGRAM.phases[3])).toEqual({
-			min: 2,
-			max: 3,
-		});
-	});
-
-	it("returns null for an exercise not yet introduced", () => {
-		expect(targetSets(PROGRAM, stepDown, PROGRAM.phases[0])).toBeNull();
-		expect(targetSets(PROGRAM, stepDown, PROGRAM.phases[1])).toEqual({
-			min: 2,
-			max: 2,
-		});
-	});
-});
+/*
+ * `targetSets` y `exercisesForPhase` vivían aquí y se han ido con `slotOf`: una
+ * fase ya no indexa una columna de la hoja. La equivalencia exhaustiva entre lo
+ * que daban y lo que da ahora el plan resuelto está en
+ * `lib/migrate-prescription.test.ts`, que es donde tiene sentido comprobarla.
+ */
 
 describe("resolveSetCount", () => {
 	it("normalises fixed counts, ranges and absence", () => {
@@ -89,24 +57,6 @@ describe("targetRir", () => {
 		expect(targetRir(PROGRAM.phases[0])).toEqual({ min: 2, max: 3 });
 		expect(targetRir(PROGRAM.phases[1])).toEqual({ min: 2, max: 2 });
 		expect(targetRir(PROGRAM.phases[2])).toEqual({ min: 1, max: 2 });
-	});
-});
-
-describe("exercisesForPhase", () => {
-	const exercises = PROGRAM.sessions[0].exercises;
-
-	it("omits exercises not yet introduced and keeps program order", () => {
-		const phase1 = exercisesForPhase(PROGRAM, exercises, PROGRAM.phases[0]);
-		expect(phase1.map((exercise) => exercise.id)).toEqual([
-			"prensa",
-			"abduccion",
-			"balance-unilateral",
-		]);
-	});
-
-	it("includes step-down from phase 2", () => {
-		const phase2 = exercisesForPhase(PROGRAM, exercises, PROGRAM.phases[1]);
-		expect(phase2.map((exercise) => exercise.id)).toContain("step-down-bajo");
 	});
 });
 

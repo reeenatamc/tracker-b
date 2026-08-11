@@ -5,7 +5,6 @@ import {
 	makeSets,
 	PROGRAM,
 } from "./__fixtures__/program";
-import { targetSets } from "./phases";
 import {
 	DEFAULT_INCREMENT_KG,
 	decideProgression,
@@ -266,7 +265,7 @@ describe("first time doing an exercise", () => {
 			exercise: prensa,
 			lastSets: [],
 			targetRir: PHASE_1_RIR,
-			targetSets: targetSets(PROGRAM, prensa, PROGRAM.phases[0]),
+			targetSets: { min: 2, max: 2 },
 		});
 		expect(decision).toEqual({ kind: "start", loadKg: 5, perSide: true });
 	});
@@ -279,7 +278,7 @@ describe("exercises that are not progressed by load", () => {
 			exercise: balance,
 			lastSets: [],
 			targetRir: PHASE_1_RIR,
-			targetSets: targetSets(PROGRAM, balance, PROGRAM.phases[0]),
+			targetSets: { min: 3, max: 3 },
 		});
 		expect(decision).toEqual({ kind: "qualitative" });
 	});

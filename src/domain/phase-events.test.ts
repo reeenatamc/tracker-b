@@ -234,6 +234,8 @@ describe("discrepancia entre lo guardado y lo derivado", () => {
 		endedAt: null,
 		skippedExerciseIds: [],
 		extraExerciseIds: [],
+		prescriptionContract: "legacy" as const,
+		snapshotId: null,
 	});
 
 	it("no encuentra ninguna cuando el log coincide con lo estampado", () => {

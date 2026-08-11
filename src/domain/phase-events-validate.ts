@@ -87,7 +87,7 @@ function validatePhases(program: Program): PhaseLogProblem[] {
 }
 
 /**
- * `slotOf` walks `inheritsFrom` recursively, so a cycle there is not a cosmetic
+ * The migration walks `inheritsFrom` recursively, so a cycle there is not a cosmetic
  * problem: unchecked it shows up as a stack overflow the moment the app opens.
  */
 function inheritanceCycles(program: Program): PhaseLogProblem[] {
