@@ -6,66 +6,94 @@ de sitio y quitarle la única pista que había.
 
 ---
 
-## T-001 · Una serie registrada no sobrevivió a la recarga
+## T-001 · Una serie registrada no sobrevive a la recarga
 
-**Estado:** abierto, sin reproducir · **Severidad si se confirma:** alta · **Detectado:** 11 ago 2026, smoke test de cierre de E1
+**Estado:** **reproducido y diagnosticado** · **Severidad: alta** · Corrección pendiente de aprobación
 
-### Qué se observó
+### Reproducido: 120 pérdidas en 250 iteraciones
 
-Durante el smoke test de E1, sobre el build de producción servido en un origen aislado:
+`harness/` escribe a través de la capa de persistencia real de la app, interrumpe la página
+a distancias variables de la escritura, reabre la base y cuenta. Cada intento distingue
+cuatro cosas, porque tienen causas distintas y tres de ellas no son pérdida de datos.
 
-1. Se pulsó «Empezar sesión» en el día de cardio + tobillo.
-2. Se guardó la primera serie de `knee_to_wall`. La interfaz respondió como corresponde:
-   avanzó al ejercicio siguiente y **arrancó el temporizador de descanso**, que sólo se
-   dispara después de insertar la serie. Así que la escritura ocurrió.
-3. Se navegó al historial con una carga de página completa, unos dos segundos después.
-4. El historial mostraba **15 series** — exactamente las de la sesión base sembrada. La
-   serie recién registrada no estaba.
+| Escenario | ok | vista vieja | **perdidas** |
+|---|---:|---:|---:|
+| sin interrupción (250 ms) | 24 | 1 | **0** |
+| guardar → recargar 50 ms | 24 | 1 | **0** |
+| guardar → recargar 5 ms | 23 | — | **2** |
+| guardar → recargar 0 ms | 19 | — | **6** |
+| guardar → navegar 5 ms | 23 | — | **2** |
+| guardar → navegar 0 ms | 15 | — | **10** |
+| doble click | — | — | **25 / 25** |
+| ráfaga de 10 | — | — | **25 / 25** |
+| ráfaga bajo carga | — | — | **25 / 25** |
+| `pagehide` durante la escritura | — | — | **25 / 25** |
 
-La `SessionRecord` sí sobrevivió: el reloj de sesión siguió corriendo tras la recarga y la
-sesión aparecía en el historial. Sólo se perdió la `SetRecord`.
+**Cero** «click no recibido». **Cero** «escritura iniciada pero no terminada»: `insert()`
+devolvió siempre. Aun así la fila no estaba en el disco.
 
-### Qué se intentó después, sin reproducirlo
+La curva dosis-respuesta es la firma de una carrera: cuanto menos tiempo entre la escritura
+y la interrupción, más se pierde. A 250 ms no se pierde nada; en el mismo tick se pierde
+todo.
 
-| Intento | Condiciones | Resultado |
-|---|---|---|
-| 2 | Guardar, esperar 6 s, navegar | Se perdió — **pero el clic pudo no registrarse**: se usó una referencia de elemento obtenida antes de una recarga, y no se verificó que la interfaz avanzara |
-| 3 | Guardar, verificar avance, esperar 5 s, navegación del router, recarga completa | **Persistió** (16 series) |
-| 4 | Guardar y forzar recarga **120 ms** después | **Persistió** (17 series) |
-| 5 | Origen limpio, **primera serie de una sesión recién creada**, recarga 120 ms después | **Persistió** (16 series) |
+### Causa raíz
 
-El intento 5 reproduce las condiciones exactas del intento 1 —primera serie de una sesión
-nueva, recarga casi inmediata— y no falló.
+`collection.insert()` **no escribe en disco**. Devuelve una `Transaction` cuyo
+`isPersisted.promise` se resuelve cuando el volcado ocurre de verdad — así lo dice el
+contrato de TanStack DB, literalmente: *«Await `isPersisted.promise`»*.
 
-### Hipótesis, por orden de plausibilidad
+**La app lo descarta en los diecinueve sitios donde escribe.** Cero apariciones de
+`isPersisted` en todo `src/`. La serie existe en memoria, la pantalla se actualiza, el
+temporizador de descanso arranca — y que llegue a OPFS depende de que la página siga viva
+lo suficiente.
 
-1. **El clic del intento 2 no llegó a ocurrir**, y el intento 1 fue una carrera entre el
-   vaciado a OPFS y el `pagehide` que dispara `database.close()` en `db/collections.ts`.
-   Encajaría con que la sesión —escrita ~20 s antes— sí sobreviviera y la serie no.
-2. Alguna diferencia entre la navegación a nivel de pestaña usada en el intento 1 y la
-   navegación de página de los intentos 4 y 5.
-3. Un reinicio de colección de la capa de persistencia. El archivo SQLite contenía nueve
-   filas con `knee_to_wall` cuando la sesión base sólo tiene una, lo que indica escrituras
-   que después dejaron de leerse — aunque las páginas liberadas de SQLite también explican
-   ese recuento, así que no prueba nada por sí solo.
+Y hay un segundo mecanismo que convierte la carrera en certeza:
 
-### Por qué importa
+```ts
+// src/db/collections.ts
+window.addEventListener("pagehide", () => {
+    void database.close?.();      // ← con escrituras aún pendientes
+}, { once: true });
+```
 
-Es la capa que guarda lo que se hace en el gimnasio. Una serie perdida en silencio es peor
-que un error visible: el registro es la razón de ser de la app, y el motor de progresión
-lee la última sesión para decidir la siguiente carga.
+Se cierra la base justo cuando los volcados siguen en vuelo. Por eso el escenario que
+dispara `pagehide` a mano pierde 25 de 25.
+
+### Por qué se vio una vez y no las cuatro siguientes
+
+Porque el intento original navegó ~2 s después de guardar, y los intentos de reproducción
+esperaron o navegaron por rutas del router en vez de recargar. La ventana es de
+milisegundos. Lo que la abre de par en par no es esperar poco: es **escribir dos veces
+seguidas**, que es lo que hace un doble toque o el registro rápido de dos series.
 
 ### Qué NO es
 
-No lo introdujo E1. Toda la ruta implicada —`db/collections.ts`, `db/synced.ts`,
-`db/records.ts`, `routes/index.tsx`— quedó sin tocar en esa etapa, verificado con
-`git status`.
+No lo introdujeron E1 ni E2. Es anterior a las dos, y vive entero en
+`db/collections.ts` y en cómo la app llama a `insert()`.
 
-### Siguiente paso cuando se retome
+### Corrección propuesta, sin aplicar
 
-Instrumentar antes que arreglar: registrar el momento de la inserción y el del vaciado a
-OPFS, y correr un bucle de guardar-y-recargar unas cincuenta veces buscando la ventana.
-Si aparece, la corrección probable es esperar a que la escritura se confirme antes de
-soltar los manejadores en `pagehide`.
+Toca durabilidad de datos y merece su propia revisión. Tres piezas:
 
-**Mientras tanto:** el respaldo sigue siendo la red de seguridad, y ahora tiene pruebas.
+1. **Esperar el volcado donde importa.** `await collections.sets.insert(...).isPersisted.promise`
+   antes de dar la serie por guardada. Convierte los sitios de escritura en asíncronos.
+2. **No cerrar la base con escrituras pendientes.** O se esperan antes de cerrar, o no se
+   cierra en `pagehide` — el cierre existe para soltar los bloqueos de OPFS, y hay que
+   medir si sigue haciendo falta.
+3. **Que `syncable()` lleve la cuenta** de las transacciones en vuelo y exponga un
+   `whenAllPersisted()`, para que el punto 2 tenga a qué esperar.
+
+`src/db/durability.test.ts` deja las dos primeras como pruebas `it.fails`: afirman el
+contrato que la app debería cumplir y hoy fallan a propósito. Cuando la corrección aterrice
+empezarán a pasar, y eso hará fallar el `it.fails` — que es la señal para convertirlas en
+aserciones normales.
+
+### Cómo volver a correrlo
+
+```bash
+npx vite --config vite.harness.config.ts    # http://localhost:4500
+```
+
+Se conduce solo. La pestaña puede estar en segundo plano: usa un reloj de `MessageChannel`
+porque Chrome estrangula `setTimeout` a uno por minuto en pestañas ocultas — lo que al
+principio hacía que una iteración tardara 100 s en vez de 0,8.

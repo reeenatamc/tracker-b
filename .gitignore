@@ -44,6 +44,9 @@ coverage
 *.db
 *.db-journal
 
+# El harness de T-001 escribe su propia base OPFS; nada suyo se despliega.
+# El código sí se versiona: es una herramienta, no un experimento suelto.
+
 # Misc
 *.local
 todos.json

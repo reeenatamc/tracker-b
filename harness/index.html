@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>T-001 · harness de pérdida de sets</title>
+  <style>
+    body { font: 13px/1.6 ui-monospace, Menlo, monospace; margin: 2rem; max-width: 60rem; }
+    h1 { font-size: 1.1rem; }
+    pre { white-space: pre-wrap; }
+    .bar { height: 6px; background: #e4eaf0; border-radius: 3px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; background: #0a6fa8; }
+  </style>
+</head>
+<body>
+  <h1>T-001 · ¿se pierde algún set?</h1>
+  <div class="bar"><i id="bar" style="width:0"></i></div>
+  <pre id="out">arrancando…</pre>
+  <button id="reset">reiniciar</button>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
