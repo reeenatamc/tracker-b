@@ -357,6 +357,16 @@ describe("proyección", () => {
 		expect(projection.missedAnchors).toEqual([
 			{ phaseId: "fase_b", plannedStart: "2026-02-01", overdueDays: 12 },
 		]);
+
+		// Y lo que importa tanto como el reporte: no se ha inventado la transición.
+		expect(phaseForDate(program, events, "2026-02-13").id).toBe("fase_a");
+		// La fase anclada aparece en la proyección como algo que viene, no como
+		// algo que empezó: su inicio no queda por detrás de hoy.
+		const anchored = projection.phases.find((p) => p.phaseId === "fase_b");
+		expect(anchored?.start).toBe("2026-02-01");
+		expect(
+			events.some((e) => "toPhaseId" in e && e.toPhaseId === "fase_b"),
+		).toBe(false);
 	});
 
 	it("un ancla que ya se cumplió no aparece como perdida", () => {

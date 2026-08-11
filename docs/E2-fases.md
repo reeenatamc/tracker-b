@@ -892,7 +892,7 @@ Cambios de firma, no de comportamiento: pasar la fase en vez de su id.
 
 | # | Criterio | Cómo se comprueba |
 |---|---|---|
-| 1 | Las pruebas de caracterización de E0 pasan **sin modificarlas** | `git diff` vacío en `characterisation.test.ts` |
+| 1 | Las **decisiones y expectativas del motor** en las pruebas de caracterización de E0 quedan intactas. Lo único que puede cambiar es la representación de `PhaseId` que E2 exige — un valor renombrado, no una decisión movida | Las quince expectativas de `decideProgression` sin tocar; sólo `phaseId: 2` → `"progresion"` |
 | 2 | **G1**: equivalencia exhaustiva día a día contra la implementación vieja | Prueba 1 de §12 |
 | 3 | **G1**: ninguna sesión guardada cambia de fase | Ida y vuelta sobre un volcado real |
 | 4 | **G2**: sin cambios en `progression.ts`, `library.ts`, `muscles.ts`, `safety.ts` | `git diff --name-only` |

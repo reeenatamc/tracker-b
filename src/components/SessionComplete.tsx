@@ -151,7 +151,7 @@ export function SessionComplete({
 					/>
 				</div>
 				<p className="mt-2 text-[0.8125rem] text-muted">
-					Fase {progress.phaseId} · {progress.phaseName} ·{" "}
+					{progress.phaseName} ·{" "}
 					<span className="tabular">
 						{progress.sessionsThisWeek}/{progress.sessionsTarget}
 					</span>{" "}
