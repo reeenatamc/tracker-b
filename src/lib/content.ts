@@ -7,10 +7,18 @@
  */
 
 import ankleProtocolData from "@content/ankle-protocol.yaml";
+import libraryData from "@content/library.yaml";
 import programData from "@content/program.yaml";
 import sourcesData from "@content/sources.yaml";
 import type { z } from "zod";
-import { AnkleProtocol, Program, Sources } from "@/domain/schema";
+import { composeProgram, indexLibrary } from "@/domain/library";
+import {
+	AnkleProtocol,
+	ExerciseLibrary,
+	Program,
+	ProgramFile,
+	Sources,
+} from "@/domain/schema";
 
 /**
  * Fails loudly and specifically. A silently half-parsed program would mean
@@ -32,7 +40,24 @@ function validate<T extends z.ZodType>(
 	return result.data;
 }
 
-export const program = validate(Program, programData, "program.yaml");
+/**
+ * The library is indexed first, then the program is composed against it.
+ *
+ * The composed result is validated a second time, as a `Program`. That is not
+ * belt and braces: the file on disk and the shape the app reads are now two
+ * different things, and only checking the input would let a bad composition
+ * reach the gym looking plausible.
+ */
+export const library = indexLibrary(
+	validate(ExerciseLibrary, libraryData, "library.yaml"),
+);
+
+export const program = validate(
+	Program,
+	composeProgram(validate(ProgramFile, programData, "program.yaml"), library),
+	"program.yaml + library.yaml",
+);
+
 export const ankleProtocol = validate(
 	AnkleProtocol,
 	ankleProtocolData,

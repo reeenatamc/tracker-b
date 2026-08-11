@@ -29,6 +29,14 @@ const write = (file: string, data: unknown) =>
 	);
 
 const program = read("program.yaml");
+const library = read("library.yaml");
+
+/*
+ * The library travels whole. It is anatomy and technique, not planning: nothing
+ * in it identifies a person, and trimming it would leave the example program
+ * referencing exercises that do not exist.
+ */
+write("library.yaml", library);
 
 write("program.yaml", {
 	meta: {

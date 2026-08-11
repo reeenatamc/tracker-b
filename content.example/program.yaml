@@ -142,10 +142,8 @@ sessions:
     name: Full Body A
     weekday: monday
     exercises:
-      - id: bike_warmup
-        name: Bicicleta
+      - exerciseId: bike_warmup
         order: 1
-        muscle: Calentamiento
         setsByPhase:
           "1": 1
           "2": 1
@@ -165,15 +163,15 @@ sessions:
           raw: ""
         rir: null
         restSeconds: null
-        substitution: Elíptica suave
-        technique: No convertirlo en cardio duro
         goal: Elevar temperatura sin cansar
         progression: Doble progresión
-        isAnkle: false
-      - id: leg_press
-        name: Prensa de piernas
+        trainingRole: warmup
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Elíptica suave
+      - exerciseId: leg_press
         order: 2
-        muscle: Cuádriceps + glúteos
         setsByPhase:
           "1": 2
           "2": 2
@@ -194,18 +192,17 @@ sessions:
         rir:
           min: 2
           max: 3
-        restSeconds:
-          min: 90
-          max: 120
-        substitution: Hack/prensa distinta
-        technique: Pies algo más altos por tobillo
+        restSeconds: null
         goal: Patrón dominante de rodilla estable
         progression: Doble progresión
-        isAnkle: true
-      - id: leg_curl
-        name: Curl femoral acostado/sentado
+        trainingRole: strength
+        cues:
+          - Pies algo más altos por tobillo
+        allowedSubstitutions:
+          - kind: note
+            text: Hack/prensa distinta
+      - exerciseId: leg_curl
         order: 3
-        muscle: Isquios
         setsByPhase:
           "1": 2
           "2": 2
@@ -226,18 +223,16 @@ sessions:
         rir:
           min: 2
           max: 3
-        restSeconds:
-          min: 75
-          max: 90
-        substitution: Sentado ↔ acostado
-        technique: Bajada controlada
+        restSeconds: null
         goal: Flexión de rodilla/isquios
         progression: Doble progresión
-        isAnkle: false
-      - id: seated_row
-        name: Remo sentado
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Sentado ↔ acostado
+      - exerciseId: seated_row
         order: 4
-        muscle: Espalda media + dorsal
         setsByPhase:
           "1": 2
           "2": 2
@@ -258,22 +253,20 @@ sessions:
         rir:
           min: 2
           max: 3
-        restSeconds:
-          min: 90
-          max: 90
-        substitution: Remo máquina
-        technique: Sin balancear torso
+        restSeconds: null
         goal: Tirón horizontal/postura
         progression: Doble progresión
-        isAnkle: false
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Remo máquina
   - id: full_body_b
     name: Full Body B
     weekday: wednesday
     exercises:
-      - id: bike_warmup
-        name: Bicicleta
+      - exerciseId: bike_warmup
         order: 1
-        muscle: Calentamiento
         setsByPhase:
           "1": 1
           "2": 1
@@ -293,15 +286,15 @@ sessions:
           raw: ""
         rir: null
         restSeconds: null
-        substitution: Elíptica
-        technique: ""
         goal: Calentar
         progression: Doble progresión
-        isAnkle: false
-      - id: leg_press
-        name: Prensa de piernas
+        trainingRole: warmup
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Elíptica
+      - exerciseId: leg_press
         order: 2
-        muscle: Cuádriceps + glúteos
         setsByPhase:
           "1": 2
           "2": 2
@@ -322,18 +315,17 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 90
-          max: 120
-        substitution: Hack/prensa distinta
-        technique: Misma postura sin dolor
+        restSeconds: null
         goal: Segunda exposición semanal de pierna
         progression: Doble progresión
-        isAnkle: true
-      - id: glute_kickback
-        name: Glute kickback máquina/polea
+        trainingRole: strength
+        cues:
+          - Misma postura sin dolor
+        allowedSubstitutions:
+          - kind: note
+            text: Hack/prensa distinta
+      - exerciseId: glute_kickback
         order: 3
-        muscle: Glúteo mayor
         setsByPhase:
           "1": 2
           "2": 2
@@ -354,18 +346,16 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 60
-          max: 75
-        substitution: Puente glúteo
-        technique: No arquear lumbar
+        restSeconds: null
         goal: Extensión de cadera sin exigir mucho tobillo
         progression: Doble progresión
-        isAnkle: false
-      - id: lat_pulldown
-        name: Jalón al pecho
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Puente glúteo
+      - exerciseId: lat_pulldown
         order: 4
-        muscle: Dorsal + bíceps
         setsByPhase:
           "1": 2
           "2": 2
@@ -386,22 +376,20 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 90
-          max: 90
-        substitution: Jalón agarre neutro
-        technique: Agarre cómodo; no detrás de cabeza
+        restSeconds: null
         goal: Tirón vertical/espalda
         progression: Doble progresión
-        isAnkle: false
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Jalón agarre neutro
   - id: full_body_c
     name: Full Body C
     weekday: friday
     exercises:
-      - id: bike_warmup
-        name: Bicicleta
+      - exerciseId: bike_warmup
         order: 1
-        muscle: Calentamiento
         setsByPhase:
           "1": 1
           "2": 1
@@ -421,15 +409,15 @@ sessions:
           raw: ""
         rir: null
         restSeconds: null
-        substitution: Elíptica
-        technique: ""
         goal: Calentar
         progression: Doble progresión
-        isAnkle: false
-      - id: leg_press
-        name: Prensa de piernas
+        trainingRole: warmup
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Elíptica
+      - exerciseId: leg_press
         order: 2
-        muscle: Cuádriceps + glúteos
         setsByPhase:
           "1": 2
           "2": 2
@@ -450,18 +438,16 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 90
-          max: 120
-        substitution: Hack/prensa distinta
-        technique: ""
+        restSeconds: null
         goal: Tercera exposición con poco volumen por sesión
         progression: Doble progresión
-        isAnkle: true
-      - id: leg_curl
-        name: Curl femoral
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Hack/prensa distinta
+      - exerciseId: leg_curl
         order: 3
-        muscle: Isquios
         setsByPhase:
           "1": 2
           "2": 2
@@ -482,18 +468,16 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 75
-          max: 90
-        substitution: Sentado ↔ acostado
-        technique: ""
+        restSeconds: null
         goal: Segunda exposición directa de isquios
         progression: Doble progresión
-        isAnkle: false
-      - id: seated_row
-        name: Remo sentado
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Sentado ↔ acostado
+      - exerciseId: seated_row
         order: 4
-        muscle: Espalda media + dorsal
         setsByPhase:
           "1": 2
           "2": 2
@@ -514,14 +498,14 @@ sessions:
         rir:
           min: 2
           max: 2
-        restSeconds:
-          min: 90
-          max: 90
-        substitution: Remo máquina
-        technique: ""
+        restSeconds: null
         goal: Segunda exposición horizontal
         progression: Doble progresión
-        isAnkle: false
+        trainingRole: strength
+        cues: []
+        allowedSubstitutions:
+          - kind: note
+            text: Remo máquina
 cardio:
   - phase: 1
     tuesday:

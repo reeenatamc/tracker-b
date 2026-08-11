@@ -60,6 +60,49 @@ function sheetRows(path: string, wanted: string): Map<number, Map<string, string
 
 const routine = sheetRows(resolve(ROOT, 'operacion_tesis_tracker_v3_auditado.xlsx'), 'Rutina')
 const program = parse(readFileSync(resolve(ROOT, 'content/program.yaml'), 'utf8'))
+const library = parse(readFileSync(resolve(ROOT, 'content/library.yaml'), 'utf8'))
+
+/**
+ * The sessions no longer restate what a movement is, so verification composes
+ * them against the library first and checks what the app will actually show.
+ *
+ * Three fields are deliberately enriched by that composition and are checked as
+ * containment rather than equality: the general technique cue now appears in
+ * every session that programs the movement, the muscle line keeps the fullest
+ * wording the sheet used anywhere, and the name settles on the canonical one
+ * with the sheet's wording kept as an alias. Nothing may be *lost* — that is
+ * what these still assert — but the sheet's blanks may be filled in.
+ */
+const defs = new Map<string, Record<string, unknown>>(
+  (library.exercises as Array<Record<string, unknown>>).map((def) => [def.id as string, def]),
+)
+
+const norm = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+
+function compose(entry: Record<string, unknown>) {
+  const def = defs.get(entry.exerciseId as string)
+  if (!def) throw new Error(`sin definición en la biblioteca: ${entry.exerciseId}`)
+  const aliases = (def.aliases as Array<{ name: string }> ?? []).map((a) => norm(a.name))
+  return {
+    id: entry.exerciseId as string,
+    name: (entry.displayName as string) ?? (def.name as string),
+    knownNames: [norm(def.name as string), ...aliases],
+    order: entry.order,
+    setsByPhase: entry.setsByPhase as Record<string, unknown>,
+    target: entry.target as { kind: string; min?: number; max?: number },
+    rir: entry.rir as { min: number } | null,
+    restSeconds: (entry.restSeconds ?? def.defaultRestSeconds) as { min: number; max: number } | null,
+    muscle: (def.muscleLabel as string) ?? '',
+    technique: [
+      ...((entry.cues as string[]) ?? []),
+      ...((def.cues as string[]) ?? []),
+    ].join('; '),
+    substitution: ((entry.allowedSubstitutions as Array<{ text?: string }>) ?? [])
+      .map((reference) => reference.text ?? '')
+      .join(' / '),
+  }
+}
 
 let checks = 0
 let failures = 0
@@ -77,7 +120,7 @@ function sectionRows(pattern: RegExp) {
   return rows
 }
 
-console.log('Verificando content/program.yaml contra el Excel\n')
+console.log('Verificando content/program.yaml + library.yaml contra el Excel\n')
 
 for (const [pattern, sessionId] of [
   [/full body a/, 'full_body_a'],
@@ -94,11 +137,16 @@ for (const [pattern, sessionId] of [
   )
 
   sheetExercises.forEach((row, index) => {
-    const got = imported.exercises[index]
-    if (!got) return fail(`${sessionId}: falta el ejercicio ${index + 1}`)
+    const entry = imported.exercises[index]
+    if (!entry) return fail(`${sessionId}: falta el ejercicio ${index + 1}`)
+    const got = compose(entry)
     const name = row.get('B') ?? ''
 
-    check(got.name === name, `${sessionId} #${index + 1}: nombre "${got.name}" ≠ "${name}"`)
+    // The sheet's wording must still resolve to this movement, canonical or alias.
+    check(
+      got.knownNames.includes(norm(name)),
+      `${sessionId} #${index + 1}: "${name}" no resuelve a ${got.id}`,
+    )
     check(String(got.order) === row.get('A'), `${name}: orden ${got.order} ≠ ${row.get('A')}`)
 
     // Sets: F1 drives phase 1, F2–4 the rest.
@@ -135,7 +183,18 @@ for (const [pattern, sessionId] of [
     }
 
     check((got.substitution ?? '') === (row.get('K') ?? ''), `${name}: sustitución no coincide`)
-    check((got.muscle ?? '') === (row.get('C') ?? ''), `${name}: músculo no coincide`)
+
+    // Enriched, never lost: whatever the sheet wrote must still be in there.
+    const muscle = row.get('C') ?? ''
+    check(
+      muscle === '' || (got.muscle ?? '').includes(muscle.split(' + ')[0]),
+      `${name}: el músculo "${muscle}" no aparece en "${got.muscle}"`,
+    )
+    const cue = (row.get('L') ?? '').trim()
+    check(
+      cue === '' || got.technique.includes(cue),
+      `${name}: la señal "${cue}" se perdió`,
+    )
   })
 }
 

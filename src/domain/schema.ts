@@ -252,6 +252,286 @@ export const Sources = z.object({
 });
 export type Sources = z.infer<typeof Sources>;
 
+// ----------------------------------------------------------- exercise library
+
+/**
+ * The library: what a movement *is*, as opposed to what a session asks of it.
+ *
+ * Until now every exercise was defined inline inside each session, so the same
+ * movement was written out three times and the three copies drifted — one
+ * carried the technique cue, the others carried an empty string. Identity lives
+ * here once; prescription lives in the template.
+ */
+
+export const MuscleId = z.enum([
+	"quads",
+	"hamstrings",
+	"glute_max",
+	"glute_med",
+	"adductors",
+	"calves",
+	"tibialis",
+	"peroneals",
+	"chest",
+	"lats",
+	"mid_back",
+	"lower_back",
+	"front_delts",
+	"side_delts",
+	"rear_delts",
+	"biceps",
+	"triceps",
+	"forearms",
+	"abs",
+	"obliques",
+]);
+export type MuscleId = z.infer<typeof MuscleId>;
+
+/** What an exercise trains that is not a muscle. Never counted as sets. */
+export const FunctionalTarget = z.enum([
+	"ankle_stability",
+	"ankle_control",
+	"balance",
+]);
+export type FunctionalTarget = z.infer<typeof FunctionalTarget>;
+
+export const MovementPattern = z.enum([
+	// hip and knee
+	"squat",
+	"hinge",
+	"lunge",
+	"knee_flexion",
+	"hip_extension",
+	"hip_abduction",
+	// torso
+	"horizontal_push",
+	"horizontal_pull",
+	"vertical_push",
+	"vertical_pull",
+	"shoulder_abduction",
+	// arm
+	"elbow_flexion",
+	"elbow_extension",
+	// core
+	"anti_extension",
+	"anti_rotation",
+	"trunk_flexion",
+	// ankle
+	"ankle_plantarflexion",
+	"ankle_dorsiflexion",
+	"ankle_eversion",
+	// not classifiable by joint
+	"balance",
+	"mobility",
+	"cardio",
+]);
+export type MovementPattern = z.infer<typeof MovementPattern>;
+
+/**
+ * Joints the movement loads or challenges enough that pain there is a reason to
+ * modify it. Stated for every exercise, because a partial list would give the
+ * future safety rules false negatives — an untyped exercise would never trip.
+ */
+export const JointId = z.enum([
+	"ankle",
+	"knee",
+	"hip",
+	"lumbar",
+	"thoracic",
+	"shoulder",
+	"elbow",
+	"wrist",
+	"cervical",
+]);
+export type JointId = z.infer<typeof JointId>;
+
+/** What kind of stimulus the movement gives. Intrinsic to it. */
+export const StimulusType = z.enum([
+	"resistance",
+	"balance",
+	"mobility",
+	"cardio",
+]);
+export type StimulusType = z.infer<typeof StimulusType>;
+
+/**
+ * What a prescription uses the movement for. NOT a property of the exercise:
+ * `calf_raise` sits in the rehab protocol today and could be plain strength work
+ * tomorrow without changing its id.
+ */
+export const TrainingRole = z.enum(["strength", "rehab", "warmup", "cardio"]);
+export type TrainingRole = z.infer<typeof TrainingRole>;
+
+export const EquipmentKind = z.enum([
+	"machine",
+	"cable",
+	"dumbbell",
+	"barbell",
+	"band",
+	"bodyweight",
+	"cardio_machine",
+	"none",
+]);
+export type EquipmentKind = z.infer<typeof EquipmentKind>;
+
+/** A name this movement has gone by, and where that name came from. */
+export const ExerciseAlias = z.object({
+	name: z.string().min(1),
+	source: z
+		.enum(["spreadsheet-v2", "spreadsheet-v3", "gym", "manual"])
+		.optional(),
+});
+export type ExerciseAlias = z.infer<typeof ExerciseAlias>;
+
+/**
+ * A substitution. `note` keeps the spreadsheet's free text when it does not
+ * correspond to any library movement — forcing it into a reference would be
+ * inventing, and dropping it would lose what the spreadsheet did know.
+ *
+ * There is deliberately no field for sharing load history: a different id is a
+ * different history, always. The "same movement, other name" case is what
+ * aliases are for, and those share an id.
+ */
+export const SubstitutionRef = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("exercise"),
+		exerciseId: z.string().min(1),
+		equivalence: z.enum([
+			"same_pattern",
+			"same_muscle",
+			"regression",
+			"progression",
+		]),
+		reason: z.string().default(""),
+	}),
+	z.object({ kind: z.literal("note"), text: z.string().min(1) }),
+]);
+export type SubstitutionRef = z.infer<typeof SubstitutionRef>;
+
+export const ExerciseDef = z.object({
+	/** Canonical id. NEVER changes — it is the key the whole log hangs off. */
+	id: z.string().min(1),
+	/** Preferred name. Free to change: it is not identity. */
+	name: z.string().min(1),
+	aliases: z.array(ExerciseAlias).default([]),
+
+	/** Only muscles. Never a group, and never a function. */
+	primaryMuscles: z.array(MuscleId).default([]),
+	secondaryMuscles: z.array(MuscleId).default([]),
+	functionalTargets: z.array(FunctionalTarget).default([]),
+	pattern: MovementPattern,
+	stimulusType: StimulusType,
+
+	equipmentKind: EquipmentKind,
+	/** The muscle line as the spreadsheet wrote it, kept for display. */
+	muscleLabel: z.string().default(""),
+
+	/** General technique: true in any session. Prescription cues live elsewhere. */
+	cues: z.array(z.string()).default([]),
+	commonErrors: z.array(z.string()).default([]),
+
+	/** Typical range of the movement. NOT the prescription. */
+	typicalReps: Range.nullable().default(null),
+	defaultRestSeconds: Range.nullable().default(null),
+
+	/** Catalogue of known alternatives. Does not imply any are offered. */
+	substitutions: z.array(SubstitutionRef).default([]),
+	cautions: z.array(z.string()).default([]),
+
+	jointLoads: z.array(JointId).default([]),
+
+	media: z
+		.array(z.object({ kind: z.enum(["image", "video"]), url: z.string() }))
+		.default([]),
+
+	/** Declared unused: kept in the library but not programmed anywhere. */
+	unused: z.boolean().default(false),
+});
+export type ExerciseDef = z.infer<typeof ExerciseDef>;
+
+export const ExerciseLibrary = z.object({
+	exercises: z.array(ExerciseDef).min(1),
+});
+export type ExerciseLibrary = z.infer<typeof ExerciseLibrary>;
+
+/**
+ * A specific machine. `20 kg` on one leg press is not `20 kg` on another, so
+ * load history is keyed by exercise *and* equipment; volume is keyed by exercise
+ * alone.
+ *
+ * Defined here in E1, wired to performed sets in E3 — linking it touches stored
+ * records, which this stage deliberately does not.
+ */
+export const Equipment = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	gym: z.string().default(""),
+	kind: EquipmentKind,
+	/** The machine's real smallest jump, which no spreadsheet ever stated. */
+	incrementKg: z.number().nullable().default(null),
+	minLoadKg: z.number().nullable().default(null),
+	maxLoadKg: z.number().nullable().default(null),
+	loadsPerSide: z.boolean().default(false),
+	stackUnit: z.enum(["kg", "plate", "level"]).default("kg"),
+	notes: z.string().default(""),
+});
+export type Equipment = z.infer<typeof Equipment>;
+
+// ------------------------------------------------------- program, as written
+
+/**
+ * One exercise as a session prescribes it: a reference to the library plus
+ * everything that is true of *this* exposure and not of the movement.
+ *
+ * This is the on-disk shape. `lib/content.ts` composes it with the library into
+ * the `Exercise` the rest of the app already reads, so nothing downstream knows
+ * the split happened.
+ */
+export const WorkoutTemplateExercise = z.object({
+	exerciseId: z.string().min(1),
+	order: z.number().int().positive(),
+	/** When this session names it differently. Presentation, not identity. */
+	displayName: z.string().optional(),
+
+	setsByPhase: z.object({ 1: SetCount, 2: SetCount, 3: SetCount, 4: SetCount }),
+	target: Target,
+	load: Load,
+	rir: Range.nullable().default(null),
+	/** Overrides the library's default rest. */
+	restSeconds: Range.nullable().default(null),
+
+	goal: z.string().default(""),
+	progression: z.string().default(""),
+	trainingRole: TrainingRole,
+
+	/** Specific to this prescription. Never promoted to the library. */
+	cues: z.array(z.string()).default([]),
+	/** What THIS prescription permits — not the whole catalogue. */
+	allowedSubstitutions: z.array(SubstitutionRef).default([]),
+});
+export type WorkoutTemplateExercise = z.infer<typeof WorkoutTemplateExercise>;
+
+export const WorkoutTemplate = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	weekday: Weekday,
+	exercises: z.array(WorkoutTemplateExercise).min(1),
+});
+export type WorkoutTemplate = z.infer<typeof WorkoutTemplate>;
+
+/**
+ * The program as it sits on disk: the same as `Program` in every respect except
+ * that its sessions reference the library instead of restating it.
+ *
+ * `lib/content.ts` validates this, composes it against the library, and validates
+ * the result as a `Program` — so the shape the app consumes is checked, not
+ * assumed.
+ */
+export const ProgramFile = Program.omit({ sessions: true }).extend({
+	sessions: z.array(WorkoutTemplate).min(1),
+});
+export type ProgramFile = z.infer<typeof ProgramFile>;
+
 // ----------------------------------------------------------------- log records
 
 export const LoadUnit = z.enum(["kg", "bodyweight", "seconds", "minutes"]);
