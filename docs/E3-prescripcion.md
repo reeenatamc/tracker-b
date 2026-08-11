@@ -118,6 +118,9 @@ export type FieldChange =
   | { field: "trainingRole";         value: TrainingRole }
   | { field: "cues";                 value: string[] }
   | { field: "allowedSubstitutions"; value: SubstitutionRef[] }
+  | { field: "goal";                 value: string }
+  | { field: "progression";          value: string }
+  | { field: "order";                value: number }
 
 export type AdjustmentOrigin =
   | "program" | "review" | "coach" | "manual" | "safety"
@@ -146,11 +149,16 @@ type AdjustmentBase = {
 export type PlanAdjustment = AdjustmentBase &
   (
     | { kind: "set_field"; entryId: PrescriptionEntryId; change: FieldChange }
-    /** El hueco pasa a ocuparlo otro ejercicio. El hueco sigue siendo el mismo. */
+    /**
+     * El hueco pasa a ocuparlo otro ejercicio, con su prescripción entera. Lo
+     * único que sobrevive es el `entryId`. Ver §2.2.
+     */
     | {
         kind: "replace_exercise"
         entryId: PrescriptionEntryId
-        exerciseId: CanonicalId
+        entry: Omit<PrescriptionEntry, "id" | "templateId">
+        /** Obligatorio si hay un `safety` vivo sobre el hueco. Ver §2.3. */
+        safetyResolution: SafetyResolution | null
       }
     /** Un hueco nuevo, con su estado inicial completo. */
     | { kind: "add_entry"; entry: PrescriptionEntry }
@@ -159,10 +167,77 @@ export type PlanAdjustment = AdjustmentBase &
     /**
      * Aquel ajuste deja de aplicar **a partir de `effectiveOn`**. No lo borra de
      * las fechas en las que sí estuvo vigente. Ver §3.
+     *
+     * No puede apuntar a otra revocación. Ver §2.4.
      */
     | { kind: "revoke"; revokesId: string }
   )
+
+/** De dónde salió el ajuste, y qué de él es una suposición. */
+export type Provenance =
+  | { kind: "authored" }
+  | {
+      kind: "migrated"
+      from: "setsByPhase" | "exerciseOverride"
+      /** La fecha de efecto no vino del dato: la puso la migración. */
+      assumedEffectiveOn: boolean
+    }
 ```
+
+Todo ajuste lleva además `provenance`, para distinguir lo que decidiste de lo que dedujo
+una migración — y, dentro de lo migrado, qué fecha es real y cuál es una suposición.
+
+### 2.1 `goal`, `progression` y `order` sí son ajustables
+
+Los tres entran en `FieldChange` ahora y no después. `goal` y `progression` son el texto que
+lees en la barra, y cambian cuando cambia el papel del ejercicio en la semana; `order` es
+reordenar la sesión, que es algo que se quiere hacer. Ninguno tiene una razón para ser
+inmutable, y añadirlos más tarde obligaría a migrar ajustes ya escritos.
+
+### 2.2 Reemplazar un ejercicio no hereda nada
+
+`replace_exercise` lleva **la prescripción completa** del ocupante nuevo. Conservar carga,
+señales o sustituciones del anterior sería peor que un error visible: veinte kilos de remo
+sentado no son veinte kilos de otra máquina, y una señal técnica del movimiento viejo es
+una instrucción equivocada con pinta de deliberada.
+
+Lo único longitudinal es el `entryId`. Es justo la distinción de §1: el hueco persiste, su
+contenido no.
+
+### 2.3 Reemplazar con una alarma viva es un conflicto, no un trámite
+
+Si sobre ese hueco hay un ajuste `origin: "safety"` en vigor, el reemplazo **no puede
+completarse en silencio**. Trasladar una alarma al ejercicio nuevo afirmaría algo que nadie
+ha comprobado; descartarla afirmaría lo contrario. Las dos son decisiones, así que se piden:
+
+```ts
+export type SafetyResolution = {
+  /** Los ajustes safety vivos sobre el hueco en el momento del reemplazo. */
+  safetyAdjustmentIds: string[]
+  decision:
+    /** Sigue aplicando tal cual al ejercicio nuevo. */
+    | { kind: "keep" }
+    /** Se sustituye por una alarma reformulada para el movimiento nuevo. */
+    | { kind: "reformulate"; replacementAdjustmentId: string }
+    /** Deja de aplicar. Requiere su propia revocación, que se referencia aquí. */
+    | { kind: "revoke"; revocationAdjustmentId: string }
+  reason: string
+}
+```
+
+La validación rechaza un `replace_exercise` con `safetyResolution: null` cuando hay una
+alarma viva. Es la misma regla que ya gobierna `safety.ts` — el dolor manda sobre la
+progresión — llevada al sitio donde el plan podría saltársela por descuido.
+
+### 2.4 Una revocación no revoca otra revocación
+
+`revokesId` debe apuntar a un ajuste que no sea `revoke`. Lo comprueba el esquema y una
+prueba.
+
+Si una revocación fue un error, la salida no es anularla —eso encadena negaciones y hace
+que «¿qué regía el 25 de octubre?» dependa de contar cuántas hay— sino **volver a expresar
+el estado que quieres** con un ajuste nuevo y su propia fecha de efecto. Más filas, y
+legible de un vistazo.
 
 Corregir es revocar y volver a poner: un `revoke` con la fecha desde la que el anterior
 deja de valer, y un ajuste nuevo. Dos filas en vez de un `supersedesId`, porque **la
@@ -181,32 +256,73 @@ un ajuste es un estado que dura, y anularlo sólo puede mirar hacia delante.
 
 Así que hay dos ejes, y una consulta cita los dos:
 
-| Eje | Campo | Pregunta que responde |
+| Eje | Cómo se expresa | Pregunta que responde |
 |---|---|---|
 | **Tiempo de validez** | `effectiveOn` | ¿Qué prescripción regía **el día X**? |
-| **Tiempo de transacción** | `createdAt` | ¿Qué sabíamos **cuando lo miramos**? |
+| **Frontera de conocimiento** | un conjunto de ids | ¿Qué sabíamos **cuando lo miramos**? |
+
+### 3.0 La frontera no es un reloj
+
+La primera versión decía `createdAt <= knownAt`, y eso no aguanta en esta app. Dos
+dispositivos que registran sin red tienen relojes que no coinciden: un ajuste escrito en el
+móvil el martes puede llevar un `createdAt` posterior al de otro escrito en el portátil el
+miércoles, y una frontera temporal metería o dejaría fuera al que no toca.
+
+Así que la frontera es **un conjunto explícito**, no un instante:
+
+```ts
+export type KnowledgeCut = {
+  adjustmentIds: string[]
+  phaseEventIds: string[]
+}
+```
+
+`createdAt` se queda —hace falta para ordenar y para auditar— pero **no decide por sí solo
+qué conocía una consulta**. Es la misma lección que los ids de ejercicio y los de fase: un
+conjunto que se declara gana a una propiedad que se infiere.
+
+Una consulta en vivo no lleva corte y usa todo lo presente. Una versión lleva el suyo,
+congelado al marcarla, y resuelve **sólo con esos ids**.
 
 ### 3.1 Definición
 
-> Un ajuste `A` está **en vigor** en `(effectiveOn = d, knownAt = k)` si y sólo si:
+> Un ajuste `A` está **en vigor** en `(effectiveOn = d, conocimiento = K)` si y sólo si:
 >
-> 1. `A.createdAt <= k` — ya existía cuando miramos;
+> 1. `K` es nulo (consulta en vivo) o `K.adjustmentIds` contiene `A.id` — estaba dentro
+>    de lo que se conocía;
 > 2. `A.effectiveOn <= d` — ya había entrado en vigor ese día;
 > 3. si `A.onlyInPhase` no es nulo, la fase resuelta para `d` es esa;
-> 4. **no** existe una revocación `R` con `R.revokesId === A.id`,
->    `R.createdAt <= k` **y** `R.effectiveOn <= d`.
+> 4. **no** existe una revocación `R` con `R.revokesId === A.id`, que esté dentro de `K`,
+>    **y** con `R.effectiveOn <= d`.
 
 La condición 4 es la que arregla el error: una revocación tiene su propia fecha de efecto,
 así que retira el ajuste **desde ahí hacia delante** y lo deja intacto antes.
 
-### 3.2 `onlyInPhase` no es retroactivo
+### 3.2 `onlyInPhase` y la fecha son dos compuertas
 
-Un ajuste con alcance de fase creado a mitad de esa fase aplica desde su `effectiveOn`, no
-desde que la fase empezó. Las dos condiciones se cumplen a la vez: hay que estar en la fase
-**y** haber pasado la fecha de efecto.
+Las dos condiciones se cumplen a la vez: hay que estar en la fase **y** haber pasado la
+fecha de efecto. De ahí salen dos comportamientos distintos según de dónde venga el ajuste,
+y los dos son los que se quieren.
 
-Es lo que permite decir «a partir del jueves, tres series mientras siga en recomposición»
-sin reescribir el lunes.
+**Un ajuste que escribes tú a mitad de fase no es retroactivo.** Su `effectiveOn` es el día
+real, así que «a partir del jueves, tres series mientras siga en recomposición» no reescribe
+el lunes.
+
+**Un ajuste del programa sigue la entrada real a la fase, tarde o pronto.** Los que la
+migración crea desde `setsByPhase` llevan `effectiveOn` = **inicio del programa**, no el
+`plannedStart` de su fase. Estaban en el plan desde el primer día; lo que decide cuándo
+surten efecto es `onlyInPhase`, y sólo eso.
+
+La diferencia importa en los dos sentidos:
+
+| Situación | Con `effectiveOn` = `plannedStart` | Con `effectiveOn` = inicio del programa |
+|---|---|---|
+| Entras en la fase **tarde** | Funciona por casualidad | Funciona |
+| Entras en la fase **pronto** | **Falla**: la fecha aún no llegó y la prescripción de la fase no se aplica | Funciona |
+
+Usar `plannedStart` habría vuelto a atar el plan al calendario, que es exactamente lo que
+E2 fue a quitar. La compuerta es la fase; la fecha sólo existe para que un ajuste tuyo no
+mire hacia atrás.
 
 ### 3.3 Un ejemplo completo
 
@@ -221,19 +337,19 @@ Una entrada, campo `sets`, base 2.
 
 Resolución en varias consultas:
 
-| `effectiveOn` | `knownAt` | Series | Por qué |
+| `effectiveOn` | Conocimiento | Series | Por qué |
 |---|---|---|---|
-| 1 oct | hoy | **2** | A1 aún no había entrado en vigor |
-| 10 oct | hoy | **3** | A1 vigente; R1 no ha llegado; R2 no ha llegado |
-| 10 oct | 15 oct | **3** | Sólo existía A1 |
-| **25 oct** | **30 nov** | **3** | R2 aún no se había escrito |
-| **25 oct** | **hoy** | **2** | R2 existe y su efecto empieza el 20 oct |
-| 15 nov | hoy | **2** | A2 vigente |
+| 1 oct | en vivo | **2** | A1 aún no había entrado en vigor |
+| 10 oct | en vivo | **3** | A1 vigente; ninguna revocación alcanza esa fecha |
+| 10 oct | corte `{A1}` | **3** | El corte sólo contenía A1 |
+| **25 oct** | **corte `{A1, R1, A2}`** | **3** | R2 no estaba en el corte |
+| **25 oct** | **en vivo** | **2** | R2 existe y su efecto empieza el 20 oct |
+| 15 nov | en vivo | **2** | A2 vigente |
 
-Las dos filas resaltadas son el punto: **la misma fecha da respuestas distintas según
-cuándo preguntes**, y las dos son correctas. Una corrección retroactiva escrita en
-diciembre cambia lo que hoy creemos del 25 de octubre, y **no** cambia lo que creíamos en
-noviembre — que es lo que hace reproducible una versión marcada entonces.
+Las dos filas resaltadas son el punto: **la misma fecha da respuestas distintas según qué
+conocimiento cites**, y las dos son correctas. Una corrección retroactiva escrita en
+diciembre cambia lo que hoy creemos del 25 de octubre, y **no** cambia lo que decía una
+versión marcada en noviembre — porque esa versión lleva escrito, id por id, lo que conocía.
 
 ## 4. Resolución
 
@@ -241,14 +357,14 @@ noviembre — que es lo que hace reproducible una versión marcada entonces.
 export type AsOf = {
   /** La fecha cuya prescripción se consulta. */
   effectiveOn: IsoDate
-  /** Qué se sabía en ese instante. Por defecto, ahora. */
-  knownAt?: number
+  /** Qué se conocía. `null` = todo lo presente, que es la consulta en vivo. */
+  knows: KnowledgeCut | null
 }
 
 export function resolvePrescription(
   baseline: readonly PrescriptionBaseline[],
   adjustments: readonly PlanAdjustment[],
-  phaseAt: (date: IsoDate, knownAt?: number) => Phase,
+  phaseAt: (date: IsoDate, knows: KnowledgeCut | null) => Phase,
   templateId: string,
   asOf: AsOf,
 ): PrescriptionEntry[]
@@ -262,8 +378,9 @@ export function resolvePrescription(
 
 `phaseAt` se recibe como función, no se importa: **la fase también es bitemporal**. Una
 corrección de `PhaseEvent` escrita en diciembre tampoco puede mover lo que una versión de
-octubre resolvía, así que `phaseForDate` gana un `knownAt` opcional que filtra los eventos
-por `createdAt`. Es el único cambio que E3 hace en el código de E2.
+octubre resolvía, así que `phaseForDate` acepta un conjunto de ids además de la lista
+completa, y resuelve sólo con ellos. Es el único cambio que E3 hace en el código de E2 — y
+no filtra por reloj, por la razón de §3.0.
 
 Pura, sin E/S. Como todo lo que decide algo aquí.
 
@@ -293,13 +410,12 @@ export type SessionPlanSnapshot = {
   entries: PrescriptionEntry[]
 
   /**
-   * Falso: se congeló al empezar la sesión. Hecho observado, inmutable, y el
-   * rollback no lo toca.
+   * `committed`     — se congeló al empezar la sesión. Hecho observado.
+   * `reconstructed` — se dedujo después para una sesión anterior a E3. Derivado.
    *
-   * Cierto: se dedujo después para una sesión anterior a E3. Artefacto derivado —
-   * se puede regenerar, y el rollback puede borrarlo sin perder nada ocurrido.
+   * «Provisional» no se guarda: es una observación, no un estado. Ver §6.3.
    */
-  reconstructed: boolean
+  status: "committed" | "reconstructed"
   /**
    * Sólo en las reconstruidas.
    * `complete` — todo lo que la afectaba tenía fecha fiable y se pudo situar.
@@ -339,6 +455,41 @@ Puede haber más de una. Si a mitad adoptas un cambio de plan se toma otra y la 
 queda: la sesión usa la más reciente, y «qué tenías prescrito al empezar» sigue siendo
 respondible.
 
+### 6.3 Tres estados, y la regla que los ordena
+
+La versión anterior se contradecía: decía «append-only», «el rollback borra las
+reconstruidas» y «las huérfanas se descartan». Tres reglas que no pueden ser ciertas a la
+vez sobre una misma colección.
+
+Se arregla con **una sola regla, sobre una propiedad que no es un campo**:
+
+| Estado | Cómo se sabe | Se puede borrar |
+|---|---|---|
+| **committed y referenciada** | `status: "committed"` y alguna sesión la apunta | **Nunca.** Es un hecho. |
+| **reconstruida** | `status: "reconstructed"` | Sí. Es un derivado y se regenera. |
+| **provisional** | `committed` y **ninguna sesión la apunta** | Sí, con condiciones (§6.4). |
+
+> **Actualizar: nunca. Borrar: sólo si es reconstruida, o si nadie la referencia.**
+
+«Provisional» no se guarda como estado porque no lo es: es lo que se observa mientras el
+paso 3 de §7.1 aún no ha ocurrido. Guardarlo obligaría a una transición
+provisional → committed, que es un `update` sobre algo que no debe admitirlos.
+
+### 6.4 Una huérfana no se borra enseguida
+
+Una instantánea sin sesión puede no ser basura: puede que la sesión exista **en el otro
+dispositivo** y todavía no haya llegado. Borrarla al arrancar sería destruir el plan de una
+sesión real por ir demasiado rápido.
+
+Se recoge sólo cuando se cumplen las dos:
+
+1. han pasado **al menos 24 horas** desde `takenAt`, y
+2. ha habido **al menos una sincronización correcta** después de ese `takenAt`.
+
+Sin sincronización configurada, basta la primera. Es lento a propósito: el coste de guardar
+una instantánea de más durante un día es cero, y el de borrar una de menos es un plan
+perdido.
+
 ## 7. Empezar una sesión sin agujeros
 
 G3 depende de que **ninguna sesión exista sin instantánea**. No hay transacción entre
@@ -360,14 +511,39 @@ irreparable: nadie sabría qué se prescribió aquel día.
 Ambos pasos esperan al disco con `persisted()` de T-001. Una sesión no está empezada hasta
 que su instantánea está en OPFS.
 
-### 7.2 Recuperación, idempotente y al arrancar
+### 7.2 Recuperación: pre-E3 y corrupción no son lo mismo
+
+«Sesión sin instantánea y con series ⇒ es histórica» es una inferencia que no se sostiene.
+Es exactamente lo que también parecería una sesión creada **después** de E3 que perdió su
+instantánea — es decir, una violación de G3. Reconstruirla en silencio taparía el fallo con
+una deducción plausible.
+
+Así que la migración deja escrito **qué existía**, con un conjunto de ids y no con una
+fecha, por la misma razón que la frontera de conocimiento (§3.0):
+
+```ts
+export type MigrationRecord = {
+  id: "e3"
+  migratedAt: number
+  /** Las sesiones que había al migrar. Sólo éstas son reconstruibles. */
+  preExistingSessionIds: string[]
+  /** Los overrides que había, con si su fecha era real o asumida. */
+  migratedOverrideIds: string[]
+}
+```
+
+Con eso, la recuperación al arrancar —idempotente— distingue:
 
 | Situación | Qué se hace |
 |---|---|
-| Instantánea sin sesión | Huérfana del paso 3. Se descarta. |
-| Sesión con `snapshotId` que no resuelve | No debería ocurrir. Se reporta y se marca para reconstrucción. |
-| Sesión sin `snapshotId`, con series | Anterior a E3. Se reconstruye (§6.1). |
-| Sesión sin `snapshotId`, sin series | Nunca llegó a empezar. Se descarta. |
+| Instantánea sin sesión | Provisional. Se recoge sólo bajo §6.4. |
+| Sesión **en** `preExistingSessionIds`, sin instantánea | Anterior a E3. Se reconstruye (§6.1). |
+| Sesión **fuera** del corte, sin instantánea, con series | **Violación de G3.** Se reporta, se marca, y **no** se reconstruye. |
+| Sesión fuera del corte, sin instantánea, sin series | Nunca llegó a empezar. Se descarta. |
+| Sesión con `snapshotId` que no resuelve | Se reporta. Nunca se rellena adivinando. |
+
+Una violación se enseña —`SaveStatus` ya tiene el sitio y el tono— porque significa que
+algo del arranque de sesión falló, y eso hay que arreglarlo, no maquillarlo.
 
 ### 7.3 Adoptar un plan nuevo a mitad
 
@@ -396,15 +572,20 @@ export type ProgramVersion = {
   label: string      // "v3"
   /** La fecha cuya prescripción nombra. */
   cutAt: IsoDate
-  /** Qué se sabía al marcarla. Congelado aquí para que sea reproducible. */
-  knownAt: number
+  /**
+   * Qué conocía esta versión, id por id. Congelado al marcarla.
+   *
+   * No un instante: dos dispositivos sin red tienen relojes que no coinciden, y
+   * una frontera temporal metería o dejaría fuera al ajuste que no toca (§3.0).
+   */
+  knows: KnowledgeCut
   reason: string
   createdAt: number
 }
 
 export function diffVersions(a: ProgramVersion, b: ProgramVersion) {
-  const before = resolveWholePlan({ effectiveOn: a.cutAt, knownAt: a.knownAt })
-  const after  = resolveWholePlan({ effectiveOn: b.cutAt, knownAt: b.knownAt })
+  const before = resolveWholePlan({ effectiveOn: a.cutAt, knows: a.knows })
+  const after  = resolveWholePlan({ effectiveOn: b.cutAt, knows: b.knows })
   return {
     added:    entriesIn(after).filter(notIn(before)),
     removed:  entriesIn(before).filter(notIn(after)),
@@ -416,14 +597,15 @@ export function diffVersions(a: ProgramVersion, b: ProgramVersion) {
 }
 ```
 
-**`knownAt` es lo que hace reproducible una versión.** Sin él, una corrección retroactiva
+**El corte es lo que hace reproducible una versión.** Sin él, una corrección retroactiva
 escrita en diciembre cambiaría en silencio lo que v3 —marcada en octubre— dice del plan de
-octubre. Con él, v3 sigue significando lo que significaba cuando la marcaste, y la
-corrección aparece donde debe: en la diferencia con v4.
+octubre. Con él, v3 sigue significando lo que significaba, y la corrección aparece donde
+debe: en la diferencia con v4.
 
-El `knownAt` alcanza también a las fases: `resolveWholePlan` se lo pasa a `phaseForDate`,
-que filtra los `PhaseEvent` por `createdAt`. Una corrección de fase escrita en diciembre
-tampoco mueve una versión de octubre.
+El corte incluye `phaseEventIds`, así que alcanza también a las fases: `resolveWholePlan`
+se lo pasa a `phaseForDate`, que resuelve **sólo con esos eventos**. Una corrección de fase
+escrita en diciembre tampoco mueve una versión de octubre. Ése es el único cambio que E3
+hace al código de E2: `phaseForDate` acepta un conjunto de ids además de la lista completa.
 
 `added` / `removed` / `replaced` son representables porque los ajustes son una unión con
 `add_entry`, `remove_entry` y `replace_exercise` — no un `field`/`value` que sólo sabe
@@ -444,9 +626,21 @@ Seis pasos.
    cuyas series difieran de la fase de menor orden: un `set_field` con
    `onlyInPhase: <fase>`, `effectiveOn` = el `plannedStart` de esa fase, y
    `reason: "Variación de series que el programa traía escrita para esta fase."`
-4. **Migrar `ExerciseOverride`.** Cada fila pasa a un ajuste `origin: "manual"`. El
-   `effectiveOn` sale de su `updatedAt` cuando lo tiene; cuando no, del inicio del programa
-   — **y eso se anota**, porque es una suposición y las suposiciones se marcan.
+4. **Migrar `ExerciseOverride`.** Cada fila pasa a un ajuste `origin: "manual"`.
+
+   - **Con `updatedAt` fiable:** `effectiveOn` = esa fecha, `provenance.assumedEffectiveOn`
+     falso. Es historia conocida.
+   - **Sin `updatedAt`:** `effectiveOn` = **la fecha de la migración**, `createdAt` = el
+     instante de la migración, `provenance.assumedEffectiveOn` **cierto**.
+
+   Lo segundo es el punto delicado. Ponerle el inicio del programa afirmaría que existía
+   entonces, y no lo sabemos: fabricaría historia con la misma pinta que la real. Fecharlo
+   en la migración conserva su efecto de hoy en adelante —que es lo que el override hace
+   ahora mismo— sin inventar lo de atrás.
+
+   Consecuencia deliberada: las reconstrucciones de sesiones anteriores **no lo incorporan**
+   y siguen siendo `partial`, con el hueco anotado. Es la respuesta honesta: aquel día
+   quizá estaba y quizá no, y la instantánea lo dice en vez de elegir.
 5. **Retirar `slotOf()`.** El puente de E2 muere aquí, que era su fecha de caducidad.
 6. **Reconstruir instantáneas** para las sesiones existentes, por §6.1.
 
@@ -459,8 +653,10 @@ Tras el paso 3, resolver en cualquier fecha pasada devuelve exactamente lo que d
 |---|---|
 | Código | `git checkout t001`, el último estado bueno anterior a E3. |
 | Base, ajustes y versiones | `scripts/rollback-prescription.ts` los vacía. `setsByPhase` sigue intacto en el contenido, así que `slotOf` vuelve a funcionar. |
-| Instantáneas **reconstruidas** | Se borran. Son derivados: regenerables, no ocurrieron. |
-| Instantáneas **reales** | **No se tocan.** Son hechos observados y sobreviven al rollback. |
+| Instantáneas `reconstructed` | Se borran. Derivados: regenerables, no ocurrieron. |
+| Instantáneas `committed` **referenciadas** | **No se tocan.** Hechos observados; sobreviven al rollback. |
+| Instantáneas `committed` **sin referencia** | Se dejan. Puede que su sesión venga por sync (§6.4). |
+| `MigrationRecord` | **Se conserva.** Sin él se pierde qué sesiones eran anteriores a E3, y una segunda pasada no sabría cuáles puede reconstruir. |
 | Respaldo | El archivo previo a migrar. Lo único que cubre lo imprevisto. |
 
 **El script se niega** si existe algún ajuste con `origin` distinto de `program` que no
@@ -470,12 +666,15 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 ## 12. Pruebas
 
 **Temporalidad — el corazón de E3**
+0. **Relojes desalineados:** dos ajustes cuyo `createdAt` contradice el orden real de
+   creación resuelven bien, porque la frontera es un conjunto de ids y no un instante.
 1. El ejemplo completo de §3.3, sus seis consultas, una a una.
 2. Revocar hoy no cambia una fecha anterior a la fecha de efecto de la revocación.
 3. Una revocación retroactiva sí cambia esa fecha — y no cambia lo que se veía antes de
    escribirla.
 4. `onlyInPhase` creado a mitad de fase no aplica al principio de esa fase.
-5. `onlyInPhase` sigue la fase **real** de E2: entrar tarde retrasa su efecto.
+5. Un ajuste `origin: "program"` aplica al entrar en su fase **tarde**.
+5b. Y al entrar **pronto** — el caso que `plannedStart` habría roto.
 6. Orden determinista: el mismo conjunto barajado resuelve idéntico.
 
 **Bitemporalidad de versiones**
@@ -485,6 +684,12 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 
 **Cambios estructurales**
 10. `add_entry`, `remove_entry`, `replace_exercise` y `set_field`, cada uno resuelto.
+10b. `replace_exercise` **no hereda** carga, señales ni sustituciones del ocupante anterior.
+10c. Reemplazar con un `safety` vivo y `safetyResolution: null` se **rechaza**.
+10d. Las tres resoluciones —mantener, reformular, revocar— hacen lo que dicen, y ninguna
+    traslada la alarma en silencio.
+10e. `goal`, `progression` y `order` se pueden cambiar por `set_field`.
+10f. Un `revoke` que apunta a otro `revoke` se **rechaza** por esquema.
 11. Un hueco que cambia de ejercicio conserva su id y su historial.
 12. El diff reporta `added` / `removed` / `replaced` / `changed` por separado.
 
@@ -497,7 +702,14 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 **Instantáneas y arranque**
 17. Reconstrucción sin `updatedAt` → `partial`, y el override **no** se incorpora.
 18. Reconstrucción con `updatedAt` anterior → `complete`, override incorporado.
-19. Instantánea huérfana → se descarta al arrancar.
+18b. Un override sin fecha se migra con `effectiveOn` = fecha de migración y
+    `assumedEffectiveOn: true` — nunca con el inicio del programa.
+19. Instantánea huérfana **no** se borra antes de las 24 h ni sin una sincronización
+    posterior; sí después.
+19b. Una `committed` referenciada no se puede borrar ni actualizar, nunca.
+19c. Una sesión **fuera** del corte de migración y sin instantánea se **reporta** como
+    violación de G3, y no se reconstruye.
+19d. Una sesión **dentro** del corte sí se reconstruye.
 20. Fallo al persistir la sesión tras la instantánea → no queda sesión sin plan.
 21. Adoptar a mitad: si falla la persistencia, sigue mandando la anterior.
 22. Recuperación idempotente: correrla dos veces no cambia nada.
@@ -523,8 +735,8 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 **Temporales**
 1. Todo ajuste tiene `effectiveOn`.
 2. Una revocación sólo mira hacia delante desde su `effectiveOn`.
-3. Toda consulta cita `(effectiveOn, knownAt)`; `knownAt` por defecto es ahora.
-4. Un ajuste creado después de `knownAt` no influye en esa consulta.
+3. Toda consulta cita `(effectiveOn, conocimiento)`; sin corte, usa todo lo presente.
+4. Una versión resuelve **sólo** con los ids de su corte; ningún reloj interviene.
 5. `onlyInPhase` nunca es retroactivo.
 
 **De identidad**
@@ -535,14 +747,20 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 **De inmutabilidad**
 9. Una sesión con instantánea no re-resuelve.
 10. La instantánea es autocontenida.
-11. Una instantánea real nunca se borra ni se regenera.
-12. Una reconstruida siempre va marcada, con su confianza.
+11. Una `committed` referenciada por una sesión nunca se actualiza ni se borra.
+12. Una reconstruida siempre va marcada, con su confianza y sus huecos.
+12b. Una instantánea sin sesión sólo se recoge tras 24 h y una sincronización posterior.
+12c. Una sesión fuera del corte de migración nunca se reconstruye.
 13. Ajustes, instantáneas y versiones sólo crecen.
 14. La base no se reescribe.
 
 **De resolución**
 15. La precedencia es total y determinista.
-16. `safety` sólo se retira revocándolo.
+16. `safety` sólo se retira revocándolo, y reemplazar el ejercicio de un hueco con una
+    alarma viva exige resolverla explícitamente.
+16b. `replace_exercise` no hereda nada del ocupante anterior salvo el `entryId`.
+16c. Un `revoke` nunca apunta a otro `revoke`.
+16d. Todo ajuste lleva `provenance`, y lo migrado dice si su fecha es asumida.
 17. Toda fecha resuelve a exactamente una prescripción por hueco.
 18. El diff se calcula, nunca se almacena.
 
@@ -562,7 +780,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 | `src/domain/versions.ts` | **nuevo** · `diffVersions`, `resolveWholePlan` |
 | `src/domain/snapshot.ts` | **nuevo** · congelar, leer, reconstruir |
 | `src/domain/schema.ts` | las cuatro entidades, con `FieldChange` como unión discriminada |
-| `src/domain/phase-events.ts` | `phaseForDate` acepta `knownAt` — único cambio a E2 |
+| `src/domain/phase-events.ts` | `phaseForDate` acepta un `KnowledgeCut` — único cambio a E2 |
 | `src/domain/phases.ts` | **retirar `slotOf`** |
 | `src/domain/personalise.ts` | leer la prescripción resuelta |
 | `__fixtures__/prescription-entry-ids.ts` | **nuevo** · ids congelados |
@@ -622,9 +840,9 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 
 ## Lo que queda por revisar
 
-1. **§3.3** — el ejemplo de las seis consultas. Si esa tabla es lo que esperas, la
-   semántica temporal está bien; si no, es aquí donde hay que discutirlo.
-2. **§6.1** — dejar fuera un override sin fecha y marcar `partial`, en vez de incorporarlo.
-3. **§7.1** — instantánea antes que sesión, y por qué ese orden y no el contrario.
-4. **§10 paso 4** — `ExerciseOverride` sin `updatedAt` se migra con `effectiveOn` = inicio
-   del programa y la suposición anotada.
+1. **§6.4** — que una instantánea huérfana espere 24 h y una sincronización antes de
+   recogerse. Es el único número arbitrario del documento; si prefieres otro, se cambia.
+2. **§7.2** — que una sesión posterior a E3 sin instantánea se reporte como violación en
+   vez de reconstruirse. Significa ver un aviso en lugar de un plan deducido.
+3. **§2.3** — que reemplazar un ejercicio con una alarma viva obligue a decidir qué pasa
+   con ella, aunque sean dos toques más en el gimnasio.
