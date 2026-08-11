@@ -12,6 +12,13 @@ datos. Todo lo demás se construye encima de arreglar eso.
 > usan semanas relativas y cargas inventadas. Las fechas y valores reales del programa
 > están en `content/`, que está gitignored.
 
+
+> **Versión pública.** Las señales de técnica, sustituciones y nombres de máquinas del
+> programa se sustituyen aquí por una descripción de su tipo — el razonamiento y la
+> clasificación se conservan enteros, las palabras exactas no, porque viven en `content/`,
+> que es privado. La versión con los literales está en `docs/private/`, gitignored.
+
+
 ---
 
 ## 0. El veredicto, antes del detalle
@@ -82,7 +89,7 @@ Recorrido de los 35 apartados contra el código real.
 |---|---|---|---|
 | 4 | Programa y fases | **Cambia** | `PhaseId` es la unión cerrada `1\|2\|3\|4` en 38 sitios. **La fase 5 (España) no cabe sin tocar código.** Pasa a `string` ordenado por fecha. |
 | 5 | Versionado | **Cambia** | `ExerciseOverride` es lo más parecido: una fila por ejercicio, *sobrescrita en sitio*, sin fecha de efecto ni motivo. Y el historial se re-resuelve con los overrides de hoy. |
-| 7 | Biblioteca de ejercicios | **Cambia** | No hay biblioteca: cada ejercicio se define *dentro* de cada sesión, duplicado en Full Body A/B/C. Técnica y sustitución se repiten y pueden divergir. `muscle` es texto libre («Cuádriceps + glúteos»), inservible para contar volumen. |
+| 7 | Biblioteca de ejercicios | **Cambia** | No hay biblioteca: cada ejercicio se define *dentro* de cada sesión, duplicado en Full Body A/B/C. Técnica y sustitución se repiten y pueden divergir. `muscle` es texto libre (*(etiqueta muscular completa)*), inservible para contar volumen. |
 | 8 | Ejecutor | **Cambia** | `routes/index.tsx` ya muestra «la vez pasada» y precarga objetivo. Le falta: dolor por zona, marcar sustitución, y guardar la instantánea del plan al empezar. |
 | 13 | Rehabilitación | **Cambia** | Bien separada del Full Body (`cardio-day.ts`) y con chequeo comparativo sano/lesionado. Pero se registra como sets normales; necesita entidad propia con estabilidad, tiempo de balance y episodios. |
 | 14 | Cardio | **Cambia** | Se registra como un set más, en minutos. No hay modalidad, distancia, FC, RPE ni objetivo semanal comprobable. |
@@ -101,7 +108,7 @@ Recorrido de los 35 apartados contra el código real.
 | 19 | Readiness | Sin esto, una mala sesión y un mal día son indistinguibles en los datos. |
 | 16 | Nutrición | Sólo existe `nutritionAdherence: number` en el resumen semanal. Sin proteína, agua, comidas ni banco de comidas. |
 | 23 | Calendario | El día se deriva del día de la semana. Mover el miércoles al jueves no se puede expresar. |
-| 25 · 26 | Sustituciones y máquinas | `substitution` es texto libre («Hack/prensa distinta»), no un ejercicio al que cambiar. No hay entidad de equipamiento, así que 20 kg en dos máquinas distintas son el mismo dato. |
+| 25 · 26 | Sustituciones y máquinas | `substitution` es texto libre (*(otra máquina del mismo patrón)*), no un ejercicio al que cambiar. No hay entidad de equipamiento, así que 20 kg en dos máquinas distintas son el mismo dato. |
 
 ---
 
@@ -288,7 +295,7 @@ describe, **catálogo** define, **ejecución** es inmutable, **medición** obser
 |---|---|---|
 | `ExerciseDef` | Nueva | La biblioteca. Id canónico, alias, músculo primario y secundarios *tipados*, patrón, equipo, instrucciones, errores comunes, rango típico, descanso, contraindicaciones, notas propias. Se extrae de las definiciones duplicadas dentro de las sesiones. |
 | `ExerciseSubstitution` | Nueva | Sustituciones como referencias a otro `exerciseId`, no como texto. Con el motivo por el que son equivalentes. |
-| `Equipment` | Nueva | «Titanus A», «prensa inclinada». Con incremento mínimo real de la máquina, que es el dato que hoy falta para sugerir bien. |
+| `Equipment` | Nueva | *(Máquina A)*, *(prensa inclinada del gimnasio)*. Con incremento mínimo real de la máquina, que es el dato que hoy falta para sugerir bien. |
 
 ### Plan — las tres capas
 

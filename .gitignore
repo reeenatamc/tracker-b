@@ -5,6 +5,10 @@
 /content/
 /data/
 /photos/
+# Versión detallada de los documentos de diseño: cita el programa literalmente
+# (señales de técnica, sustituciones, nombres de máquinas). La contrapartida
+# saneada vive en docs/ y sí es pública.
+/docs/private/
 *.xlsx
 *.xls
 *.csv

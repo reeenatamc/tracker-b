@@ -13,6 +13,13 @@ la base de datos: eso es E2 y E3.
 > Revisión 2 — patrones anatómicos, `MuscleId` separado de la agrupación de presentación,
 > sustituciones y señales de técnica en dos niveles, `jointLoads` / `isRehabExercise`.
 
+
+> **Versión pública.** Las señales de técnica, sustituciones y nombres de máquinas del
+> programa se sustituyen aquí por una descripción de su tipo — el razonamiento y la
+> clasificación se conservan enteros, las palabras exactas no, porque viven en `content/`,
+> que es privado. La versión con los literales está en `docs/private/`, gitignored.
+
+
 ---
 
 ## Lo que encontré al medir
@@ -36,7 +43,7 @@ Once de los catorce están duplicados, y **todos los duplicados han divergido**:
 No todas las divergencias son ruido. Hay tres tipos, y sólo el primero se unifica:
 
 - **Ruido del Excel** — nombres escritos de dos formas, o el mismo movimiento clasificado
-  como «Dorsal» en una sesión y «Dorsal + bíceps» en otra. → **biblioteca**.
+  como *(etiqueta muscular corta)* en una sesión y *(etiqueta muscular completa)* en otra. → **biblioteca**.
 - **Prescripción por sesión** — `goal` dice cosas distintas a propósito, `rir` es 2–3 en A
   y 2–2 en C, el calentamiento es 8–10 min en A y 8 fijos en C. → **plantilla, intacto**.
 - **Técnica y sustituciones** — mezcla de las dos anteriores, y por eso van clasificadas
@@ -228,7 +235,7 @@ para el kickback, `ankle_eversion` y `ankle_dorsiflexion` para las de banda.
 
 | Antes | Ahora | Por qué |
 |---|---|---|
-| `lateral_raise` | `shoulder_abduction` | «Elevación lateral» es el nombre del ejercicio, no del movimiento — el mismo error que corregiste en `band_eversion` |
+| `lateral_raise` | `shoulder_abduction` | *(nombre canónico)* es el nombre del ejercicio, no del movimiento — el mismo error que corregiste en `band_eversion` |
 | `calf_raise` | `ankle_plantarflexion` | Igual; y deja los tres patrones de tobillo con la misma forma |
 
 `hinge` queda sin usar en los 26 actuales. Lo mantengo en la taxonomía porque es un patrón
@@ -353,7 +360,7 @@ export type SubstitutionRef =
 | `ExerciseDef.substitutions` | **Catálogo.** Todo lo que se sabe que puede sustituir a este movimiento, venga de donde venga. |
 | `WorkoutTemplateExercise.allowedSubstitutions` | **Permiso.** Lo que esta prescripción concreta admite. |
 
-El caso que lo motiva: `lat_pulldown` ofrece «Jalón agarre neutro» en B y «Pullover
+El caso que lo motiva: `lat_pulldown` ofrece *(alternativa de agarre)* en B y «Pullover
 máquina/polea» en C. Las dos entran al catálogo; **cada plantilla conserva exactamente la
 suya**. Que el pullover exista como alternativa no lo convierte en opción de todas las
 exposiciones de jalón.
@@ -378,30 +385,30 @@ revises**, porque es donde puedo equivocarme de criterio:
 
 | Ejercicio | Señal | Origen | Clasificación |
 |---|---|---|---|
-| `bike_warmup` | «No convertirlo en cardio duro» | A | **general** — el ejercicio canónico *es* un calentamiento, así que la señal es del movimiento |
-| `leg_press` | «Pies algo más altos por tobillo» | A | **prescripción** — acomodación por tu tobillo, no propiedad de la prensa |
-| `leg_press` | «Misma postura sin dolor» | B | **prescripción** — se refiere a mantener la postura de A |
-| `leg_curl` | «Bajada controlada» | A | **general** |
-| `seated_row` | «Sin balancear torso» | A | **general** |
-| `chest_press` | «No llegar al fallo sola» | A | **prescripción** — habla de entrenar sin quien te ayude, que es contexto tuyo, no técnica del press |
-| `lateral_raise` | «Sin encoger hombros» | A | **general** |
-| `biceps_curl` | «Codos estables» | A | **general** |
-| `cable_crunch` | «Flexionar tronco, no tirar con brazos» | A | **general** |
-| `glute_kickback` | «No arquear lumbar» | B | **general** |
-| `lat_pulldown` | «Agarre cómodo; no detrás de cabeza» | B | **general** |
-| `shoulder_press` | «Sin hiperextender espalda» | B | **general** |
-| `triceps_extension` | «Codos pegados» | B | **general** |
-| `hip_abduction` | «Control, sin rebotes» | B | **general** |
-| `pallof_press` | «No rotar» | B | **general** |
-| `soft_surface_balance` | «No ojos cerrados al principio» | rehab | **prescripción** — es una instrucción de etapa, no de técnica |
+| `bike_warmup` | *(intensidad del calentamiento)* | A | **general** — el ejercicio canónico *es* un calentamiento, así que la señal es del movimiento |
+| `leg_press` | *(acomodación por el tobillo)* | A | **prescripción** — acomodación por tu tobillo, no propiedad de la prensa |
+| `leg_press` | *(referencia cruzada a la sesión A)* | B | **prescripción** — se refiere a mantener la postura de A |
+| `leg_curl` | *(control de la fase excéntrica)* | A | **general** |
+| `seated_row` | *(evitar impulso del tronco)* | A | **general** |
+| `chest_press` | *(precaución por entrenar sin ayuda)* | A | **prescripción** — habla de entrenar sin quien te ayude, que es contexto tuyo, no técnica del press |
+| `lateral_raise` | *(evitar elevación escapular)* | A | **general** |
+| `biceps_curl` | *(posición del codo)* | A | **general** |
+| `cable_crunch` | *(qué segmento hace el trabajo)* | A | **general** |
+| `glute_kickback` | *(control lumbar)* | B | **general** |
+| `lat_pulldown` | *(posición del agarre)* | B | **general** |
+| `shoulder_press` | *(control lumbar en el empuje)* | B | **general** |
+| `triceps_extension` | *(posición del codo)* | B | **general** |
+| `hip_abduction` | *(evitar el rebote)* | B | **general** |
+| `pallof_press` | *(antirrotación)* | B | **general** |
+| `soft_surface_balance` | *(progresión de la etapa)* | rehab | **prescripción** — es una instrucción de etapa, no de técnica |
 
 **Doce generales, cuatro de prescripción.** Las tres que señalaste como ejemplo de lo que
 no debe universalizarse son tres de las cuatro; la cuarta es la instrucción de etapa del
 balance en superficie blanda.
 
-`chest_press` es el caso interesante: parece técnica pero no lo es. «No llegar al fallo
-sola» no describe cómo se hace un press de pecho — describe una precaución que depende de
-que entrenes sin nadie que te descargue la máquina. E3 podrá convertirla en una regla de
+`chest_press` es el caso interesante: parece técnica pero no lo es. la señal no describe cómo
+se hace un press de pecho — describe una precaución que depende de que entrenes sin nadie
+que te descargue la máquina. E3 podrá convertirla en una regla de
 seguridad personal, que es su sitio natural.
 
 ### 2.7 `jointLoads` y la compatibilidad de `isAnkle`
@@ -600,7 +607,7 @@ persiguen se declara en `functionalTargets`, abajo.
 E6 necesitará: *articulaciones que el movimiento carga o desafía lo bastante como para que
 un dolor ahí sea motivo de modificar*. Por eso `leg_curl` lleva `knee` y no `hip` — con la
 cadera dolorida el curl femoral no es el problema — y por eso `glute_kickback` lleva
-`lumbar`, que es justo lo que avisa su propia señal de técnica («No arquear lumbar»).
+`lumbar`, que es justo lo que avisa su propia señal de técnica (*(control lumbar)*).
 
 `wrist` y `cervical` quedan sin usar en los 26 actuales. Se mantienen en `JointId` por la
 misma razón que `hinge` en los patrones: son reales y harán falta.
@@ -626,37 +633,37 @@ y la compara con el original campo a campo.
 
 | Ejercicio | Sesión | Señal |
 |---|---|---|
-| `bike_warmup` | B, C | «No convertirlo en cardio duro» |
-| `leg_curl` | C | «Bajada controlada» |
-| `seated_row` | C | «Sin balancear torso» |
-| `lateral_raise` | C | «Sin encoger hombros» |
-| `biceps_curl` | C | «Codos estables» |
-| `cable_crunch` | C | «Flexionar tronco, no tirar con brazos» |
-| `lat_pulldown` | C | «Agarre cómodo; no detrás de cabeza» |
-| `triceps_extension` | C | «Codos pegados» |
+| `bike_warmup` | B, C | *(intensidad del calentamiento)* |
+| `leg_curl` | C | *(control de la fase excéntrica)* |
+| `seated_row` | C | *(evitar impulso del tronco)* |
+| `lateral_raise` | C | *(evitar elevación escapular)* |
+| `biceps_curl` | C | *(posición del codo)* |
+| `cable_crunch` | C | *(qué segmento hace el trabajo)* |
+| `lat_pulldown` | C | *(posición del agarre)* |
+| `triceps_extension` | C | *(posición del codo)* |
 
 **Nombres que pasan al canónico (4).** Los antiguos quedan como alias, así que nada deja de
 resolver:
 
 | Sesión | Antes | Ahora |
 |---|---|---|
-| A | Curl femoral acostado/sentado | Curl femoral |
-| A | Elevación lateral máquina/polea | Elevación lateral |
-| A | Curl bíceps polea/máquina | Curl bíceps |
-| B | Extensión tríceps polea | Extensión tríceps |
+| A | *(nombre largo de la hoja)* | *(nombre canónico)* |
+| A | *(nombre largo de la hoja)* | *(nombre canónico)* |
+| A | *(nombre largo de la hoja)* | *(nombre canónico)* |
+| B | *(nombre largo de la hoja)* | *(nombre canónico)* |
 
-**Una línea de músculo (1).** `lat_pulldown` en C pasa de «Dorsal» a «Dorsal + bíceps»: se
+**Una línea de músculo (1).** `lat_pulldown` en C pasa de *(etiqueta muscular corta)* a *(etiqueta muscular completa)*: se
 conserva la redacción más completa de las dos que usaba la hoja, porque la corta perdía
 información.
 
-Los nombres visibles pasan al canónico («Curl femoral acostado/sentado» → «Curl femoral»,
+Los nombres visibles pasan al canónico (*(nombre largo de la hoja)* → *(nombre canónico)*,
 etc.), con los antiguos como alias.
 
 **Lo que ya NO cambia, gracias a tus correcciones:**
 
 - **`leg_press` no cambia en ninguna sesión.** Sus dos señales son de prescripción, así que
-  A sigue diciendo «Pies algo más altos por tobillo», B «Misma postura sin dolor» y C nada.
-- **`chest_press` en C tampoco cambia**, tras reclasificar «No llegar al fallo sola».
+  A sigue diciendo *(acomodación por el tobillo)*, B *(referencia cruzada a la sesión A)* y C nada.
+- **`chest_press` en C tampoco cambia**, tras reclasificar *(precaución por entrenar sin ayuda)*.
 - **Ninguna sustitución se mueve de sitio.** Cada plantilla conserva la suya; el pullover
   no aparece en B ni el agarre neutro en C.
 - **Ningún RIR, target, serie ni carga cambia.**
