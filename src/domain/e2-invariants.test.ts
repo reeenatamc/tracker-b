@@ -133,3 +133,42 @@ describe("regresiones encontradas en el smoke test", () => {
 		expect(byLegacy.get(4)).toBe("definicion_tesis");
 	});
 });
+
+// ----------------------------------------------------------------- atomicity
+
+describe("la compuerta de versión y la escritura son atómicas", () => {
+	const handler = readFileSync(join(SRC, "..", "api", "sync.ts"), "utf8");
+
+	/**
+	 * Read the version, decide, then write in three separate statements and an old
+	 * client that checked while the server was still on the old shape can land its
+	 * write after a newer client upgraded it. The lock is what closes that gap;
+	 * `domain/sync.test.ts` checks the rule, this checks the mechanism is there.
+	 */
+	it("la fila de versión se toma con for update", () => {
+		expect(handler).toMatch(
+			/select schema_version from sync_meta[\s\S]*for update/,
+		);
+	});
+
+	it("la decisión y la escritura ocurren dentro de la misma transacción", () => {
+		expect(handler).toMatch(/db\.begin\(/);
+
+		const transaction = handler.slice(
+			handler.indexOf("db.begin("),
+			handler.lastIndexOf("});"),
+		);
+		expect(transaction).toMatch(/for update/);
+		expect(transaction).toMatch(/insert into records/);
+		expect(transaction).toMatch(/update sync_meta set schema_version/);
+	});
+
+	it("fuera de la transacción no queda ninguna escritura", () => {
+		const outside = handler
+			.split("db.begin(")[0]
+			.concat(handler.slice(handler.lastIndexOf("});")));
+
+		expect(outside).not.toMatch(/insert into records/);
+		expect(outside).not.toMatch(/update sync_meta/);
+	});
+});

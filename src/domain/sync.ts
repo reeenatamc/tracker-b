@@ -135,3 +135,33 @@ export function checkSchemaVersion(
 export function clientVersionOf(body: { schemaVersion?: unknown }): number {
 	return typeof body.schemaVersion === "number" ? body.schemaVersion : 1;
 }
+
+/**
+ * One request's turn at the version row, as the endpoint takes it.
+ *
+ * The endpoint runs the read, the decision and the write inside one transaction
+ * holding `sync_meta` `for update`, so concurrent requests take their turns in
+ * some order rather than interleaving. This is that turn, as a function — which
+ * makes the ordering property testable without a live database: whatever order
+ * the lock happens to grant, applying these in sequence must never let an
+ * outdated client write after an upgrade.
+ */
+export type SyncTurn =
+	| { admitted: true; serverVersion: number }
+	| { admitted: false; required: number; serverVersion: number };
+
+export function takeTurn(
+	clientVersion: number,
+	serverVersion: number,
+): SyncTurn {
+	const verdict = checkSchemaVersion(clientVersion, serverVersion);
+
+	if (!verdict.ok && verdict.reason === "client-outdated") {
+		// Turned away before writing anything, and the version is left alone.
+		return { admitted: false, required: verdict.required, serverVersion };
+	}
+
+	// A client ahead of the server raises it; one in step leaves it as it is.
+	const next = !verdict.ok ? verdict.clientVersion : serverVersion;
+	return { admitted: true, serverVersion: next };
+}

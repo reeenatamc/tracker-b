@@ -5,6 +5,7 @@ import {
 	clientVersionOf,
 	highWaterMark,
 	mergeRecords,
+	takeTurn,
 	visible,
 } from "./sync";
 
@@ -186,5 +187,76 @@ describe("compatibilidad de esquema", () => {
 		expect(verdict.ok).toBe(false);
 		// Ni sube ni baja: el endpoint responde antes de leer o escribir nada.
 		expect(verdict).toMatchObject({ reason: "client-outdated" });
+	});
+});
+
+/**
+ * The property the transaction exists for: once a schema-2 client has raised the
+ * server, no schema-1 write can get in behind it.
+ *
+ * The endpoint takes `sync_meta` `for update` inside the same transaction as the
+ * write, so two requests take turns rather than interleaving. What that turns the
+ * question into is an ordering one — and ordering is what this checks, for every
+ * order the lock could grant.
+ *
+ * What it does not check is that Postgres honours the lock. That needs a live
+ * database; the structural test in `e2-invariants.test.ts` checks the mechanism
+ * is in place, and this checks the rule it enforces.
+ */
+describe("un cliente antiguo no escribe después del upgrade", () => {
+	/** Runs turns in sequence, threading the server version through. */
+	function serialise(clientVersions: number[], from = 1) {
+		let serverVersion = from;
+		return clientVersions.map((client) => {
+			const turn = takeTurn(client, serverVersion);
+			serverVersion = turn.serverVersion;
+			return { client, ...turn };
+		});
+	}
+
+	it("el schema 2 sube el servidor y el schema 1 que venía detrás es rechazado", () => {
+		const [first, second] = serialise([2, 1]);
+
+		expect(first).toMatchObject({ admitted: true, serverVersion: 2 });
+		expect(second).toMatchObject({ admitted: false, required: 2 });
+	});
+
+	it("si el schema 1 llega primero, escribe legítimamente y el 2 sube después", () => {
+		const [first, second] = serialise([1, 2]);
+
+		// Escribió cuando el servidor todavía era 1: correcto, no hay upgrade aún.
+		expect(first).toMatchObject({ admitted: true, serverVersion: 1 });
+		expect(second).toMatchObject({ admitted: true, serverVersion: 2 });
+	});
+
+	it("ningún orden deja pasar un schema 1 después de que el servidor sea 2", () => {
+		// Todas las permutaciones de tres peticiones sobre dos versiones.
+		const orders = [
+			[1, 1, 2],
+			[1, 2, 1],
+			[2, 1, 1],
+			[2, 2, 1],
+			[1, 2, 2],
+			[2, 1, 2],
+		];
+
+		for (const order of orders) {
+			let serverVersion = 1;
+			for (const client of order) {
+				const upgraded = serverVersion === 2;
+				const turn = takeTurn(client, serverVersion);
+
+				if (upgraded && client === 1) {
+					expect(turn.admitted, `orden ${order.join(",")}`).toBe(false);
+				}
+				serverVersion = turn.serverVersion;
+			}
+		}
+	});
+
+	it("un cliente rechazado no mueve la versión del servidor", () => {
+		const turn = takeTurn(1, 2);
+		expect(turn.admitted).toBe(false);
+		expect(turn.serverVersion).toBe(2);
 	});
 });
