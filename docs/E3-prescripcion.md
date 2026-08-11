@@ -91,10 +91,23 @@ export type PrescriptionBaseline = PrescriptionEntry & {
 }
 ```
 
-Los ids se asignan una vez en la migración con la forma `slot_<plantilla>_<nn>` y se
-congelan en `__fixtures__/prescription-entry-ids.ts`, con la misma prueba de sólo-crecer que
-protege los ids de fase. El número es una posición inicial, no un orden vigente: reordenar
-cambia `order`, nunca el id.
+Los ids vienen de dos sitios, y sólo uno puede vivir en un fixture.
+
+**Sembrados.** Los que crea la migración desde el contenido: `slot_<plantilla>_<nn>`,
+congelados en `__fixtures__/prescription-entry-ids.ts` con la misma prueba de sólo-crecer
+que protege los ids de fase. El número es una posición inicial, no un orden vigente:
+reordenar cambia `order`, nunca el id.
+
+**De ejecución.** `add_entry` crea huecos desde la app, en un móvil sin red, quizá a la vez
+que el portátil hace lo mismo. Esos ids **no pueden depender de un fixture compilado**: son
+opacos y globalmente únicos —`crypto.randomUUID()`, como el resto de la app— y no aparecen
+en el fixture ni deben.
+
+La prueba de cobertura distingue por forma: todo id que case `^slot_[a-z0-9_]+$` tiene que
+estar en el fixture; los UUID quedan fuera por construcción.
+
+Tres invariantes valen para los dos: **nunca se reutiliza**, **nunca cambia**, y **el mismo
+id converge por sincronización** — que es lo que un UUID da gratis y una posición no.
 
 ### Por qué la variación por fase no está en la base
 
@@ -225,9 +238,17 @@ export type SafetyResolution = {
 }
 ```
 
-La validación rechaza un `replace_exercise` con `safetyResolution: null` cuando hay una
-alarma viva. Es la misma regla que ya gobierna `safety.ts` — el dolor manda sobre la
-progresión — llevada al sitio donde el plan podría saltársela por descuido.
+**El orden es secuencial, no atómico.** No se intenta escribir varios ajustes «a la vez»:
+primero se persiste la decisión sobre la alarma —el ajuste reformulado o su revocación,
+esperando al disco con `persisted()`—, y **sólo entonces** se admite el `replace_exercise`
+que la referencia. Si el segundo paso falla, queda una alarma resuelta y el ejercicio sin
+cambiar; el reemplazo se reintenta. Al revés quedaría un ejercicio nuevo con una alarma
+colgando de un movimiento que ya no está.
+
+La validación rechaza un `replace_exercise` cuyo `safetyResolution` sea nulo habiendo una
+alarma viva, o que referencie ajustes que todavía no existen. Es la regla de `safety.ts`
+—el dolor manda sobre la progresión— llevada al sitio donde el plan podría saltársela por
+descuido.
 
 ### 2.4 Una revocación no revoca otra revocación
 
@@ -392,7 +413,37 @@ Cuando dos ajustes en vigor tocan el mismo campo del mismo hueco, gana el últim
 |---|---|
 | 1 | `origin`: `program` < `review` = `coach` = `manual` < `safety` |
 | 2 | `effectiveOn`, ascendente |
-| 3 | `createdAt`, luego `id` — determinista entre dispositivos |
+| 3 | `id`, ascendente — **sin reloj** |
+
+### 5.1 El reloj no decide una prescripción
+
+`createdAt` salió de la frontera de conocimiento en §3.0, y sale también de aquí. Dos
+dispositivos sin red tienen relojes que no coinciden; si el desempate final dependiera de
+`createdAt`, la misma base de datos podría prescribir cosas distintas en el móvil y en el
+portátil. El `id` es arbitrario pero **idéntico en los dos**, que es lo único que hace falta.
+
+`createdAt` sigue existiendo para ordenar en pantalla y para auditar. No para decidir.
+
+### 5.2 Empatar no es lo mismo que estar de acuerdo
+
+Que la resolución sea determinista no significa que la situación sea sana. Dos ajustes vivos
+con **el mismo hueco, el mismo campo, la misma prioridad de origen y la misma fecha de
+efecto** son dos decisiones incompatibles, y elegir una por orden de id resuelve el programa
+sin resolver la contradicción.
+
+Así que se hacen las dos cosas: se resuelve —la app no puede quedarse sin responder a media
+serie— y se reporta.
+
+```ts
+| { code: "ambiguous-adjustment-conflict"
+    entryId: PrescriptionEntryId
+    field: string
+    adjustmentIds: string[]   // los empatados, en orden de resolución
+  }
+```
+
+Lo devuelve `validateAdjustments`, igual que `validateEvents` en E2 reporta sin lanzar. La
+pantalla de plan puede enseñarlo; la resolución no se detiene por ello.
 
 **`safety` arriba, y no se cae solo.** No deja de aplicar porque escribas después un ajuste
 manual: para quitarla hay que revocarla. La regla de `safety.ts` dice que el dolor manda
@@ -483,12 +534,14 @@ sesión real por ir demasiado rápido.
 
 Se recoge sólo cuando se cumplen las dos:
 
-1. han pasado **al menos 24 horas** desde `takenAt`, y
+1. ha pasado **`ORPHAN_GRACE_MS`** desde `takenAt` —24 h por defecto, constante
+   configurable y de la que ninguna corrección depende—, y
 2. ha habido **al menos una sincronización correcta** después de ese `takenAt`.
 
 Sin sincronización configurada, basta la primera. Es lento a propósito: el coste de guardar
 una instantánea de más durante un día es cero, y el de borrar una de menos es un plan
-perdido.
+perdido. El número exacto es una constante, no una decisión de diseño — moverlo no cambia
+nada más.
 
 ## 7. Empezar una sesión sin agujeros
 
@@ -514,36 +567,54 @@ que su instantánea está en OPFS.
 ### 7.2 Recuperación: pre-E3 y corrupción no son lo mismo
 
 «Sesión sin instantánea y con series ⇒ es histórica» es una inferencia que no se sostiene.
-Es exactamente lo que también parecería una sesión creada **después** de E3 que perdió su
-instantánea — es decir, una violación de G3. Reconstruirla en silencio taparía el fallo con
-una deducción plausible.
+Es exactamente lo que parecería una sesión creada **después** de E3 que perdió su
+instantánea — o sea, una violación de G3. Reconstruirla en silencio taparía el fallo con una
+deducción plausible.
 
-Así que la migración deja escrito **qué existía**, con un conjunto de ids y no con una
-fecha, por la misma razón que la frontera de conocimiento (§3.0):
+Una lista de ids capturada al migrar tampoco basta, y el contraejemplo es concreto:
 
-```ts
-export type MigrationRecord = {
-  id: "e3"
-  migratedAt: number
-  /** Las sesiones que había al migrar. Sólo éstas son reconstruibles. */
-  preExistingSessionIds: string[]
-  /** Los overrides que había, con si su fecha era real o asumida. */
-  migratedOverrideIds: string[]
-}
+```
+A migra.
+B —sin red— todavía tiene una sesión anterior a E3 sin sincronizar.
+B migra, y después esa sesión llega a A.
 ```
 
-Con eso, la recuperación al arrancar —idempotente— distingue:
+Esa sesión es legítimamente pre-E3 y **no está en el corte de A**. Con la lista como única
+verdad, A la trataría como corrupción. El corte lo capturó un dispositivo, y la verdad tiene
+que viajar con el dato.
+
+Así que **la marca va en la propia sesión**:
+
+```ts
+SessionRecord.prescriptionContract: "legacy" | "snapshot_v1"
+```
+
+- La migración marca `legacy` toda sesión existente.
+- Todo lo que E3 crea nace `snapshot_v1`.
+- **Ausente cuenta como `legacy`**: viene de un dispositivo que aún no migró, y una sesión
+  de antes de E3 es exactamente lo que es. `normalizeIncoming` la estampa al entrar, igual
+  que ya hace con la fase numérica.
+
+El contrato viaja con la fila, así que sobrevive a cualquier orden de sincronización.
+
+| `prescriptionContract` | Sin instantánea | Qué se hace |
+|---|---|---|
+| `legacy` | con o sin series | Se reconstruye (§6.1) |
+| `snapshot_v1` | con series | **Violación de G3.** Se reporta, no se reconstruye |
+| `snapshot_v1` | sin series | Nunca llegó a empezar. Se descarta |
+
+`MigrationRecord` se conserva —qué se migró, cuándo, qué overrides llevaban fecha asumida—
+pero como **evidencia de auditoría, no como fuente de verdad**.
+
+Y sigue en pie el resto:
 
 | Situación | Qué se hace |
 |---|---|
 | Instantánea sin sesión | Provisional. Se recoge sólo bajo §6.4. |
-| Sesión **en** `preExistingSessionIds`, sin instantánea | Anterior a E3. Se reconstruye (§6.1). |
-| Sesión **fuera** del corte, sin instantánea, con series | **Violación de G3.** Se reporta, se marca, y **no** se reconstruye. |
-| Sesión fuera del corte, sin instantánea, sin series | Nunca llegó a empezar. Se descarta. |
 | Sesión con `snapshotId` que no resuelve | Se reporta. Nunca se rellena adivinando. |
 
-Una violación se enseña —`SaveStatus` ya tiene el sitio y el tono— porque significa que
-algo del arranque de sesión falló, y eso hay que arreglarlo, no maquillarlo.
+Una violación se enseña —`SaveStatus` ya tiene el sitio y el tono— porque significa que algo
+del arranque de sesión falló, y eso se arregla, no se maquilla.
 
 ### 7.3 Adoptar un plan nuevo a mitad
 
@@ -562,61 +633,48 @@ del programa. Acabarías con un plan que nadie decidió, hecho de acumular desvi
 Un ajuste sólo nace de una acción explícita —«aplicar al plan»— que pide su motivo, porque
 `reason` no puede ir vacío.
 
-## 9. Versionado bitemporal
+## 9. Versionado — contrato para E4, no entrega de E3
 
-Una versión es una etiqueta sobre **dos** coordenadas, no una:
+El diseño bitemporal se queda escrito aquí porque es lo que obliga al resolver a tener la
+forma que tiene. Pero **E3 no implementa versiones**: ni la colección `ProgramVersion`, ni
+`diffVersions`, ni pantalla. Eso vuelve a E4, donde estaba en la arquitectura original.
+
+Lo que E3 sí entrega es la **capacidad**: el resolver acepta un `KnowledgeCut` opcional.
 
 ```ts
-export type ProgramVersion = {
-  id: string
-  label: string      // "v3"
-  /** La fecha cuya prescripción nombra. */
-  cutAt: IsoDate
-  /**
-   * Qué conocía esta versión, id por id. Congelado al marcarla.
-   *
-   * No un instante: dos dispositivos sin red tienen relojes que no coinciden, y
-   * una frontera temporal metería o dejaría fuera al ajuste que no toca (§3.0).
-   */
-  knows: KnowledgeCut
-  reason: string
-  createdAt: number
-}
-
-export function diffVersions(a: ProgramVersion, b: ProgramVersion) {
-  const before = resolveWholePlan({ effectiveOn: a.cutAt, knows: a.knows })
-  const after  = resolveWholePlan({ effectiveOn: b.cutAt, knows: b.knows })
-  return {
-    added:    entriesIn(after).filter(notIn(before)),
-    removed:  entriesIn(before).filter(notIn(after)),
-    replaced: entriesWhoseExerciseChanged(before, after),
-    changed:  fieldsThatDiffer(before, after),
-    volume:   { before: weeklySets(before), after: weeklySets(after) },
-    why:      adjustmentsBetween(a, b),
-  }
+export type AsOf = {
+  effectiveOn: IsoDate
+  /** `null` = consulta en vivo, todo lo presente. E3 sólo usa esto. */
+  knows: KnowledgeCut | null
 }
 ```
 
-**El corte es lo que hace reproducible una versión.** Sin él, una corrección retroactiva
-escrita en diciembre cambiaría en silencio lo que v3 —marcada en octubre— dice del plan de
-octubre. Con él, v3 sigue significando lo que significaba, y la corrección aparece donde
-debe: en la diferencia con v4.
+Con `knows: null` responde «qué rige hoy», que es todo lo que la app necesita en E3. Pasarle
+un conjunto de ids responde «qué habría dicho alguien que sólo conociera esto» — y ésa es la
+pieza sobre la que E4 construirá versiones reproducibles.
 
-El corte incluye `phaseEventIds`, así que alcanza también a las fases: `resolveWholePlan`
-se lo pasa a `phaseForDate`, que resuelve **sólo con esos eventos**. Una corrección de fase
-escrita en diciembre tampoco mueve una versión de octubre. Ése es el único cambio que E3
-hace al código de E2: `phaseForDate` acepta un conjunto de ids además de la lista completa.
+Se prueba en E3 aunque no se use en producto: un corte artificial resuelve distinto de la
+consulta en vivo. Sin esa prueba, «E4 podrá» sería una promesa en vez de una propiedad.
 
-`added` / `removed` / `replaced` son representables porque los ajustes son una unión con
-`add_entry`, `remove_entry` y `replace_exercise` — no un `field`/`value` que sólo sabe
-tocar campos de lo que ya existe.
+El contrato que E4 heredará, para que no haya que redescubrirlo:
 
-El diff **se calcula, no se guarda**: un derivado almacenado es un derivado que un día
-contradice a los datos.
+```ts
+// E4, no E3
+type ProgramVersion = {
+  id: string; label: string
+  cutAt: IsoDate
+  knows: KnowledgeCut       // congelado id por id, nunca un instante
+  reason: string; createdAt: number
+}
+```
+
+`knows` incluye `phaseEventIds`, así que `phaseForDate` también tendrá que aceptar un corte.
+**Ese cambio a E2 se hace en E4, no ahora** — E3 no lo necesita y adelantarlo sería tocar
+código de otra etapa sin motivo.
 
 ## 10. Migración
 
-Seis pasos.
+Siete pasos.
 
 1. **Asignar ids de hueco.** Uno por par plantilla-ejercicio del contenido de E1, con la
    forma `slot_<plantilla>_<nn>`, congelados en el fixture.
@@ -642,7 +700,10 @@ Seis pasos.
    y siguen siendo `partial`, con el hueco anotado. Es la respuesta honesta: aquel día
    quizá estaba y quizá no, y la instantánea lo dice en vez de elegir.
 5. **Retirar `slotOf()`.** El puente de E2 muere aquí, que era su fecha de caducidad.
-6. **Reconstruir instantáneas** para las sesiones existentes, por §6.1.
+6. **Marcar el contrato.** Toda sesión existente pasa a `prescriptionContract: "legacy"`.
+   Es lo que hace que el criterio viaje con el dato y sobreviva a cualquier orden de
+   sincronización (§7.2). A partir de aquí, todo lo que E3 crea nace `snapshot_v1`.
+7. **Reconstruir instantáneas** para las `legacy`, por §6.1.
 
 Tras el paso 3, resolver en cualquier fecha pasada devuelve exactamente lo que devolvía
 `slotOf` + `setsByPhase`. **Se comprueba día a día**, como en E2.
@@ -666,8 +727,11 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 ## 12. Pruebas
 
 **Temporalidad — el corazón de E3**
-0. **Relojes desalineados:** dos ajustes cuyo `createdAt` contradice el orden real de
-   creación resuelven bien, porque la frontera es un conjunto de ids y no un instante.
+0. **Relojes desalineados, frontera:** dos ajustes cuyo `createdAt` contradice el orden
+   real de creación resuelven bien, porque la frontera es un conjunto de ids.
+0b. **Relojes cruzados, precedencia:** dos ajustes equivalentes con `createdAt` invertido
+   entre dispositivos resuelven **igual en los dos**, porque desempata el `id`.
+0c. Y ese empate se reporta como `ambiguous-adjustment-conflict` en vez de esconderse.
 1. El ejemplo completo de §3.3, sus seis consultas, una a una.
 2. Revocar hoy no cambia una fecha anterior a la fecha de efecto de la revocación.
 3. Una revocación retroactiva sí cambia esa fecha — y no cambia lo que se veía antes de
@@ -677,12 +741,14 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 5b. Y al entrar **pronto** — el caso que `plannedStart` habría roto.
 6. Orden determinista: el mismo conjunto barajado resuelve idéntico.
 
-**Bitemporalidad de versiones**
-7. Una corrección escrita después de marcar v3 no cambia lo que v3 resuelve.
-8. Lo mismo para una corrección de `PhaseEvent`.
-9. El diff entre v3 y v4 sí la muestra.
+**Capacidad bitemporal — sin producto de versiones**
+7. Un `KnowledgeCut` artificial resuelve distinto de la consulta en vivo.
+8. Un ajuste fuera del corte no influye, aunque su `createdAt` sea anterior a todo.
+9. La consulta en vivo (`knows: null`) usa todo lo presente.
 
 **Cambios estructurales**
+9b. Un hueco creado con `add_entry` recibe un id opaco que **no** está en el fixture, y el
+   fixture sigue cubriendo todos los sembrados.
 10. `add_entry`, `remove_entry`, `replace_exercise` y `set_field`, cada uno resuelto.
 10b. `replace_exercise` **no hereda** carga, señales ni sustituciones del ocupante anterior.
 10c. Reemplazar con un `safety` vivo y `safetyResolution: null` se **rechaza**.
@@ -691,7 +757,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 10e. `goal`, `progression` y `order` se pueden cambiar por `set_field`.
 10f. Un `revoke` que apunta a otro `revoke` se **rechaza** por esquema.
 11. Un hueco que cambia de ejercicio conserva su id y su historial.
-12. El diff reporta `added` / `removed` / `replaced` / `changed` por separado.
+12. *(el diff es E4)*
 
 **G3**
 13. Congelar, cambiar el plan, releer: la sesión no se mueve.
@@ -707,9 +773,11 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 19. Instantánea huérfana **no** se borra antes de las 24 h ni sin una sincronización
     posterior; sí después.
 19b. Una `committed` referenciada no se puede borrar ni actualizar, nunca.
-19c. Una sesión **fuera** del corte de migración y sin instantánea se **reporta** como
-    violación de G3, y no se reconstruye.
-19d. Una sesión **dentro** del corte sí se reconstruye.
+19c. Una sesión `snapshot_v1` sin instantánea se **reporta** como violación de G3.
+19d. Una sesión `legacy` sin instantánea se reconstruye.
+19e. **Dos dispositivos:** A migra; una sesión `legacy` llega de B **después**; A la
+    reconstruye en vez de tratarla como corrupción.
+19f. Una sesión que llega **sin** el campo se trata como `legacy`.
 20. Fallo al persistir la sesión tras la instantánea → no queda sesión sin plan.
 21. Adoptar a mitad: si falla la persistencia, sigue mandando la anterior.
 22. Recuperación idempotente: correrla dos veces no cambia nada.
@@ -736,11 +804,14 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 1. Todo ajuste tiene `effectiveOn`.
 2. Una revocación sólo mira hacia delante desde su `effectiveOn`.
 3. Toda consulta cita `(effectiveOn, conocimiento)`; sin corte, usa todo lo presente.
-4. Una versión resuelve **sólo** con los ids de su corte; ningún reloj interviene.
+4. Una consulta con corte resuelve **sólo** con esos ids; ningún reloj interviene.
+4b. Ningún reloj decide una prescripción: el desempate final es el `id`.
+4c. Un empate de prioridad se reporta, no se esconde.
 5. `onlyInPhase` nunca es retroactivo.
 
 **De identidad**
 6. El id de un hueco no se deriva de su ocupante y no cambia nunca.
+6b. Los sembrados están en el fixture; los de ejecución son opacos y únicos globalmente.
 7. Cambiar el ejercicio de un hueco conserva su id.
 8. Los ids de hueco sólo crecen.
 
@@ -750,7 +821,8 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 11. Una `committed` referenciada por una sesión nunca se actualiza ni se borra.
 12. Una reconstruida siempre va marcada, con su confianza y sus huecos.
 12b. Una instantánea sin sesión sólo se recoge tras 24 h y una sincronización posterior.
-12c. Una sesión fuera del corte de migración nunca se reconstruye.
+12c. Una sesión `snapshot_v1` nunca se reconstruye.
+12d. El contrato de prescripción viaja en la propia sesión, no en una lista aparte.
 13. Ajustes, instantáneas y versiones sólo crecen.
 14. La base no se reescribe.
 
@@ -768,6 +840,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 19. Registrar una serie no crea nunca un ajuste.
 20. Ninguna sesión existe sin instantánea.
 21. E3 no emite sugerencias.
+22. E3 no crea ni compara versiones: eso es E4.
 
 ## 14. Archivos
 
@@ -777,20 +850,18 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 |---|---|
 | `src/domain/prescription.ts` | **nuevo** · `resolvePrescription`, pliegue, precedencia |
 | `src/domain/adjustments.ts` | **nuevo** · vigencia bitemporal, orden |
-| `src/domain/versions.ts` | **nuevo** · `diffVersions`, `resolveWholePlan` |
 | `src/domain/snapshot.ts` | **nuevo** · congelar, leer, reconstruir |
 | `src/domain/schema.ts` | las cuatro entidades, con `FieldChange` como unión discriminada |
-| `src/domain/phase-events.ts` | `phaseForDate` acepta un `KnowledgeCut` — único cambio a E2 |
 | `src/domain/phases.ts` | **retirar `slotOf`** |
 | `src/domain/personalise.ts` | leer la prescripción resuelta |
 | `__fixtures__/prescription-entry-ids.ts` | **nuevo** · ids congelados |
-| pruebas | `prescription`, `adjustments`, `versions`, `snapshot` |
+| pruebas | `prescription`, `adjustments`, `snapshot` |
 
 **Persistencia**
 
 | Archivo | Qué |
 |---|---|
-| `src/db/collections.ts` | cuatro colecciones nuevas, append-only y `durable` |
+| `src/db/collections.ts` | **tres** colecciones nuevas, append-only y `durable` |
 | `src/db/records.ts` | exponerlas |
 | `src/lib/migrate-prescription.ts` | **nuevo** · los seis pasos de §10 |
 | `src/lib/recover-snapshots.ts` | **nuevo** · §7.2 |
@@ -801,7 +872,8 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 
 `routes/index.tsx` (congelar al empezar con el orden de §7.1, leer de la instantánea),
 `history.tsx` (leer de la instantánea), pantalla mínima de plan para ajustes y versiones.
-`ExerciseSettings` escribe `PlanAdjustment` en vez de `ExerciseOverride`.
+`ExerciseSettings` escribe `PlanAdjustment` en vez de `ExerciseOverride`. **Sin pantalla
+de versiones:** eso es E4.
 
 ## 15. Criterios de aceptación
 
@@ -811,7 +883,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 | 2 | **G3**: ninguna sesión existe sin instantánea | Pruebas 19–22 |
 | 3 | **G4**: sin motor | Pruebas 28–29 |
 | 4 | Revocar no reescribe el pasado | Pruebas 2–3 |
-| 5 | Una versión marcada es reproducible | Pruebas 7–8 |
+| 5 | El resolver acepta un corte y responde distinto con él | Pruebas 7–9 |
 | 6 | El id de un hueco sobrevive al cambio de ejercicio | Prueba 11 |
 | 7 | Los cuatro cambios estructurales se representan | Pruebas 10, 12 |
 | 8 | Ninguna reconstrucción inventa un override | Pruebas 17–18 |
@@ -819,6 +891,7 @@ borraría algo que nadie más tiene escrito. Los lista y para.
 | 10 | Equivalencia exhaustiva con `slotOf` | Prueba 25 |
 | 11 | Rollback conserva las instantáneas reales | Prueba dedicada |
 | 12 | `slotOf` eliminado | `git grep slotOf` vacío |
+| 12b | **Sin versiones:** no existen `ProgramVersion` ni `diffVersions` | `git grep` vacío |
 | 13 | Caracterización de E0 intacta | `git diff` |
 | 14 | Los cinco comandos en verde | — |
 | 15 | Smoke test en origen aislado | Sesión completa |
@@ -838,11 +911,11 @@ borraría algo que nadie más tiene escrito. Los lista y para.
    lo que se congeló.
 4. **`ExerciseOverride` se retira con datos dentro**, y parte de esos datos no tiene fecha.
 
-## Lo que queda por revisar
+## Estado
 
-1. **§6.4** — que una instantánea huérfana espere 24 h y una sincronización antes de
-   recogerse. Es el único número arbitrario del documento; si prefieres otro, se cambia.
-2. **§7.2** — que una sesión posterior a E3 sin instantánea se reporte como violación en
-   vez de reconstruirse. Significa ver un aviso en lugar de un plan deducido.
-3. **§2.3** — que reemplazar un ejercicio con una alarma viva obligue a decidir qué pasa
-   con ella, aunque sean dos toques más en el gimnasio.
+Arquitectura cerrada. E3 entrega **tres** colecciones —base, ajustes, instantáneas—, el
+resolver con corte opcional, la migración de siete pasos y la recuperación.
+
+Fuera de E3, a propósito: el motor de adaptación (E6) y el versionado con su diff y su
+pantalla (E4). El diseño bitemporal se queda escrito como contrato para que E4 no tenga que
+redescubrirlo, y se prueba en E3 aunque no se use en producto.
