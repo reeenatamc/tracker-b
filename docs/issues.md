@@ -77,6 +77,23 @@ migración la nombre.
 **RESTORE ≠ CREATE.** Rellenar el hueco con la versión de hoy, porque hoy es
 cuando pulsaste el botón, es el mismo defecto con otro sombrero.
 
+### Y una corrección que salió de la misma corrida
+
+La sesión de tobillo se reconstruía con **cero entradas** y decía `complete`. No
+era un número mal calculado: era un silencio seguro de sí mismo. El ejecutor
+sabía que un día de tobillo saca su prescripción del protocolo indexado por
+semana; la recuperación no, y le pasaba la base de fuerza, que para
+`cardio_ankle` no tiene ninguna fila.
+
+`domain/session-plan.ts` deja esa decisión en un sitio —`sessionBaseline`— y la
+consumen los dos: el ejecutor al congelar y la recuperación al reconstruir. Y
+cuando de verdad no se puede construir un plan, devuelve el motivo en palabras,
+que el llamante convierte en `partial` con el hueco nombrado.
+
+Debajo, una red: `reconstruct` no puede declarar `complete` una reconstrucción
+sin entradas. Decir «lo tengo todo» sobre nada es peor que admitir que no se
+sabe, así que si nadie nombró el hueco, lo nombra ella.
+
 ### Lo que lo protege
 
 `src/lib/restore-legacy.test.ts` cubre los seis casos con fixtures que **omiten**
@@ -85,6 +102,12 @@ la propiedad en vez de ponerla a `null` — una prueba que escriba
 respaldo de schema 2, respaldo de E3 en regla, fila de schema 3 corrupta,
 restauración que no cambia metadatos, e importar dos veces. Con el código
 anterior fallan seis.
+
+`src/domain/session-plan.test.ts` cubre la otra mitad: que un día de tobillo
+histórico se reconstruya con sus huecos `rehab_*`, en orden, con los ejercicios
+de esa semana y no de otra; que un ajuste vigente entonces entre y uno posterior
+no; que congelar y reconstruir pidan la base al mismo sitio; y que `complete`
+nunca pueda describir una prescripción vacía.
 
 ---
 

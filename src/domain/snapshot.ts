@@ -108,6 +108,20 @@ export function reconstruct(input: {
 		input.phaseAt,
 	);
 
+	/*
+	 * `complete` means "everything that was prescribed that day is in here", and
+	 * an empty reconstruction cannot mean that: a session happened, so something
+	 * was prescribed. Left unguarded it once said `complete` about an ankle day
+	 * it had resolved to nothing, which is the most confident possible way to say
+	 * nothing at all.
+	 */
+	const gaps = [...input.source.undatable];
+	if (entries.length === 0 && gaps.length === 0) {
+		gaps.push(
+			`no se pudo reconstruir ninguna entrada para ${input.templateId}`,
+		);
+	}
+
 	return {
 		id: input.id,
 		sessionId: input.session.id,
@@ -117,9 +131,8 @@ export function reconstruct(input: {
 		phaseId: input.phaseId,
 		entries,
 		status: "reconstructed",
-		reconstructionConfidence:
-			input.source.undatable.length === 0 ? "complete" : "partial",
-		reconstructionGaps: [...input.source.undatable],
+		reconstructionConfidence: gaps.length === 0 ? "complete" : "partial",
+		reconstructionGaps: gaps,
 		adjustmentIds: input.source.datable.map((adjustment) => adjustment.id),
 	};
 }

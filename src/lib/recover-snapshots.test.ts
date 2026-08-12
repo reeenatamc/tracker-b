@@ -65,7 +65,7 @@ function run(overrides: Partial<RecoveryInput> = {}) {
 	return planRecovery({
 		sessions: [],
 		snapshots: [],
-		baseline: BASELINE,
+		baselineFor: () => ({ rows: BASELINE, gap: null }),
 		adjustments: [],
 		phaseAt: PHASE,
 		schemaOf: () => 3,

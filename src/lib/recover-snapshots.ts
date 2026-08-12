@@ -50,7 +50,17 @@ export type RecoveryPlan = {
 export type RecoveryInput = {
 	sessions: readonly SessionRecord[];
 	snapshots: readonly SessionPlanSnapshot[];
-	baseline: readonly PrescriptionBaseline[];
+	/**
+	 * What this session's plan is built from. A function, not a list, because a
+	 * strength day and an ankle day do not read the same place — and the executor
+	 * answers that question with `sessionBaseline`, so this one must too. Handing
+	 * every session the strength baseline is what made an ankle day reconstruct to
+	 * nothing and then call it `complete`.
+	 */
+	baselineFor: (session: SessionRecord) => {
+		rows: readonly PrescriptionBaseline[];
+		gap: string | null;
+	};
 	adjustments: readonly PlanAdjustment[];
 	phaseAt: (date: string) => PhaseId;
 	/** The schema each session row was written under, stamped by `syncable`. */
@@ -112,14 +122,21 @@ export function planRecovery(input: RecoveryInput): RecoveryPlan {
 			continue;
 		}
 
+		const from = input.baselineFor(session);
+		const source = datable(input.adjustments);
+
 		plan.reconstruct.push(
 			reconstruct({
 				id: input.idFor(session.id),
 				session,
 				phaseId: session.phase,
 				templateId: session.templateId,
-				baseline: input.baseline,
-				source: datable(input.adjustments),
+				baseline: from.rows,
+				// A plan that could not be built is named, never passed over in
+				// silence: that is what turns it into `partial` with a reason.
+				source: from.gap
+					? { ...source, undatable: [...source.undatable, from.gap] }
+					: source,
 				phaseAt: input.phaseAt,
 			}),
 		);

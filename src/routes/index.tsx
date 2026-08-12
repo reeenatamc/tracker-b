@@ -38,7 +38,6 @@ import {
 import {
 	CARDIO_EXERCISE,
 	cardioFor,
-	rehabAsEntry,
 	rehabAsExercise,
 	rehabStageFor,
 } from "@/domain/cardio-day";
@@ -67,6 +66,7 @@ import type {
 	PrescriptionEntry,
 	SetRecord,
 } from "@/domain/schema";
+import { sessionBaseline } from "@/domain/session-plan";
 import { activeSnapshot, freeze } from "@/domain/snapshot";
 import { program } from "@/lib/content";
 import { formatDate, formatTarget, todayIso } from "@/lib/format";
@@ -149,16 +149,17 @@ function Today() {
 	 * slot anybody adjusts, so it is built on the spot. See `rehabAsEntry`.
 	 */
 	const snapshot = session ? activeSnapshot(planSnapshots, session.id) : null;
+	// One function decides what a session's plan is built from, and `freeze` and
+	// `reconstruct` both go through it. Rehab rows are not seeded — the protocol is
+	// indexed by week — but their ids are stable all the same, so a rehab slot is a
+	// slot like any other and gets the same adjustment log as everything else.
 	const plan = {
-		// Rehab rows are built here rather than seeded, because the protocol is
-		// indexed by week and nobody migrated it. Their ids are stable all the same
-		// — `rehab_<id>` from the protocol's own id — so a rehab slot is a slot like
-		// any other, and gets the same adjustment log as everything else.
-		baseline: strengthTemplate
-			? prescriptionBaseline
-			: (rehab?.exercises ?? []).map((entry, index) =>
-					rehabAsEntry(entry, template?.id ?? "cardio_ankle", index + 1),
-				),
+		baseline: sessionBaseline({
+			templateId: template?.id ?? "unscheduled",
+			date: today,
+			program,
+			seeded: prescriptionBaseline,
+		}).rows,
 		adjustments: planAdjustments,
 	};
 	const livePrescription: PrescriptionEntry[] = template

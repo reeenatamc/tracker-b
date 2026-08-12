@@ -192,7 +192,7 @@ describe("A · un respaldo anterior a E3", () => {
 		const plan = planRecovery({
 			sessions: [PRE_E3 as unknown as SessionRecord],
 			snapshots: [],
-			baseline: [],
+			baselineFor: () => ({ rows: [], gap: null }),
 			adjustments: [],
 			phaseAt: () => "adaptacion",
 			schemaOf: () => null,
@@ -284,7 +284,7 @@ describe("D · una fila sellada bajo E3 sin contrato", () => {
 		const plan = planRecovery({
 			sessions: [rota as unknown as SessionRecord],
 			snapshots: [],
-			baseline: [],
+			baselineFor: () => ({ rows: [], gap: null }),
 			adjustments: [],
 			phaseAt: () => "adaptacion",
 			schemaOf: () => 3,
