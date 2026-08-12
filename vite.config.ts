@@ -4,9 +4,9 @@ import tailwindcss from "@tailwindcss/vite";
 import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
-import { parse } from "yaml";
+import { defineConfig } from "vite";
 import { serviceWorker } from "./plugins/service-worker.ts";
+import { yamlContent } from "./plugins/yaml-content.ts";
 
 const resolvePath = (path: string) =>
 	fileURLToPath(new URL(path, import.meta.url));
@@ -19,24 +19,6 @@ const resolvePath = (path: string) =>
 const contentDir = existsSync(resolvePath("./content"))
 	? "./content"
 	: "./content.example";
-
-/**
- * Turns `.yaml` imports into plain object modules at build time. Content is
- * static, so parsing belongs in the build — this keeps the YAML parser out of
- * the browser bundle entirely.
- */
-function yamlContent(): Plugin {
-	return {
-		name: "yaml-content",
-		transform(code, id) {
-			if (!/\.ya?ml$/.test(id)) return null;
-			return {
-				code: `export default ${JSON.stringify(parse(code))}`,
-				map: null,
-			};
-		},
-	};
-}
 
 export default defineConfig({
 	resolve: {

@@ -5,11 +5,9 @@
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
 import { program } from "@/lib/content";
-import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
-import { migratePhaseIds } from "@/lib/migrate-phase-ids";
 import { requestPersistence } from "@/lib/persist";
 import { registerServiceWorker } from "@/lib/register-service-worker";
-import { syncSeed } from "@/lib/seed";
+import { bootstrap } from "./bootstrap";
 import { type Collections, getCollections } from "./collections";
 
 const CollectionsContext = createContext<Collections | null>(null);
@@ -29,29 +27,32 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 		void requestPersistence();
 
 		let cancelled = false;
-		getCollections().then(
-			(collections) => {
-				// Brings in the baseline session, so the very first workout already has
-				// history to progress from.
-				syncSeed(collections);
 
-				// Re-points records logged under name-derived ids. Idempotent, so it
-				// costs nothing after the first launch.
-				const migration = migrateExerciseIds(collections);
-				if (migration.setsMigrated > 0 || migration.unmapped.length > 0) {
-					console.info("Migración de ids de ejercicio:", migration);
+		/*
+		 * One chain, fully awaited, with one catch at the end.
+		 *
+		 * The shape matters as much as the contents: the previous version put the
+		 * work in a `.then` whose own failures nothing caught, so a throw inside it
+		 * became an unhandled rejection and the screen sat on "Abriendo tu
+		 * registro…" for ever, with no error and no way out. There are two endings
+		 * here and no third one.
+		 */
+		(async () => {
+			try {
+				const collections = await getCollections();
+				const report = await bootstrap(collections, program);
+
+				if (
+					report.exercises.setsMigrated > 0 ||
+					report.phases.sessionsMigrated > 0 ||
+					report.seed.revived > 0 ||
+					report.seed.removed > 0
+				) {
+					console.info("Arranque:", report);
 				}
 
-				// Names the phases stamped on stored sessions, and seeds the log with
-				// the transitions the plan implies. Idempotent, same as the above, and
-				// it runs before anything reads a phase so the two can never disagree.
-				const phases = migratePhaseIds(collections, program);
-				if (phases.sessionsMigrated > 0 || phases.eventsSeeded > 0) {
-					console.info("Migración de fases:", phases);
-				}
 				if (!cancelled) setStatus({ state: "ready", collections });
-			},
-			(error: unknown) => {
+			} catch (error: unknown) {
 				if (!cancelled) {
 					setStatus({
 						state: "error",
@@ -61,8 +62,9 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 								: "No se pudo abrir la base de datos.",
 					});
 				}
-			},
-		);
+			}
+		})();
+
 		return () => {
 			cancelled = true;
 		};

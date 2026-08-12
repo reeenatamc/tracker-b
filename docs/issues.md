@@ -6,6 +6,108 @@ de sitio y quitarle la única pista que había.
 
 ---
 
+## T-002 · Las reconciliaciones de arranque corrían sobre una base vacía
+
+**Estado: RESUELTO** · **Severidad era: alta** · encontrado validando el restore pre-E3
+
+> Dos defectos, y el primero llevaba tres etapas tapando al segundo.
+
+### Cómo apareció
+
+Restaurando un respaldo real en un origen aislado (`localhost:4510`, `main`, OPFS vacío)
+para tener un control anterior a E3. El restore trajo todo —3 sesiones, 43 series, 3
+chequeos de tobillo, 1 ejercicio propio, 2 inspo, 1 foto, sin huérfanos ni duplicados— y
+aun así el historial mostraba «1» donde debía decir «Adaptación», y `curl-femoral` donde
+debía decir «Curl femoral».
+
+### A · La barrera que no existía
+
+`getCollections()` resuelve cuando las colecciones están **construidas**; las filas llegan
+de OPFS después. Las tres reconciliaciones corrían en ese hueco. Medido dentro de
+`provider.tsx`, sobre una base que en ese mismo instante tenía 3 sesiones y 43 series:
+
+```
+sesionesAlEmpezar: 0    setsAlEmpezar: 0
+migratePhaseIds → { sessionsMigrated: 0, eventsSeeded: 4, unmapped: [] }
+```
+
+`unmapped: []` es lo que lo hacía invisible: no es que no supiera mapear las fases, es que
+no vio ninguna fila. Un reconciliador que recorre cero filas no se queja de nada.
+
+Consecuencia sobre el respaldo restaurado: las 3 sesiones se quedaron con `phase: 1` para
+siempre, y 8 de 20 ids de ejercicio distintos se quedaron en su forma anterior a E1.
+
+### B · Lo que había debajo
+
+Con la barrera puesta, el arranque dejó de terminar: se quedaba en «Abriendo tu registro…»
+indefinidamente. Con un `try/catch` alrededor apareció la causa:
+
+```
+CollectionOperationError: Cannot insert document with ID "seed-2026-08-08-0"
+because it already exists in the collection
+```
+
+`syncSeed` borraba sus series y las reinsertaba cuando no coincidían. Pero `delete` en esta
+app es una lápida —`syncable` marca `deletedAt` y deja la fila—, así que el id seguía
+ocupado y el `insert` siguiente chocaba. Y chocaba **después** de los borrados: 15 series
+con lápida y ninguna reescrita.
+
+Peor aún, el `throw` ocurría dentro del callback de un `.then(alHacerlo, alFallar)`. El
+segundo argumento sólo atrapa fallos de la promesa original, nunca los del primero, así que
+quedaba como rechazo sin gestionar: ni pantalla de error ni salida.
+
+**A tapaba a B.** Tal como estaba `main`, nada reventaba y nada se perdía: el restore
+simplemente se quedaba a medias. En cuanto se arreglaba A sin arreglar B, el arranque se
+rompía y se tumbaban 15 series.
+
+### El arreglo
+
+`src/db/bootstrap.ts` centraliza la barrera y el orden. La barrera está una vez, no en cada
+migrador: uno que tenga que acordarse de esperar es uno que se olvidará, y el fallo es
+silencioso.
+
+```
+hidratar (preload de todas)
+  → migrateExerciseIds
+  → migratePhaseIds
+  → syncSeed          ← compara contra filas que las dos anteriores ya arreglaron
+  → READY
+  → sync remoto
+```
+
+`syncSeed` reconcilia **por id**: actualiza si existe, revive si tiene lápida, inserta si no
+está. Nunca borra para recrear el mismo id. Lo único que retira —filas de una siembra
+anterior más larga— va al final, cuando ya nada puede lanzar. La garantía es que un fallo a
+mitad puede dejar filas que reconciliar en el siguiente arranque, y nunca menos de las que
+había.
+
+El provider envuelve toda la cadena en un `try/catch` y la espera: hay dos finales,
+`listo` o `error visible`, y no hay un tercero.
+
+### Un tercer agujero que la barrera cierra de paso
+
+`applyRemote` decide entre `update` e `insert` con `has(id)`. Sobre una colección sin
+hidratar, `has` devolvía `false` para una fila que sí estaba en disco, así que el primer
+`syncOnce()` podía intentar insertarla y chocar. `SyncProvider` es hijo de
+`CollectionsProvider` y sólo se monta en el estado listo — y ahora «listo» significa además
+«hidratada».
+
+### Lo que lo protege
+
+`src/db/bootstrap.test.ts` modela colecciones que devuelven vacío hasta que su `preload()`
+resuelve, que es como se comportan las de verdad, y comprueba que ningún reconciliador ve
+cero filas mientras aún llegan datos. Con el orden viejo estas pruebas fallan.
+`src/lib/seed.test.ts` cubre id repetido, lápida, sobrantes, fallo a mitad e idempotencia.
+`src/db/provider.test.ts` fija la forma de la cadena y que el sync no arranca antes de READY.
+
+### Lo que queda anotado, no arreglado
+
+La capa de persistencia llama a `markReady()` también cuando la hidratación **falla**, así
+que una colección que no pudo cargar llega a la barrera vacía y con aspecto de resuelta. Es
+un fallo peor que este y necesita su propia respuesta.
+
+---
+
 ## T-001 · Una serie registrada no sobrevive a la recarga
 
 **Estado: RESUELTO** · commit `e30a16d` · etiqueta `t001` · **Severidad era: alta**
