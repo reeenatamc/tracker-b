@@ -8,7 +8,8 @@ de sitio y quitarle la única pista que había.
 
 ## T-004 · Restaurar un respaldo viejo lo hacía parecer nuevo
 
-**Estado: RESUELTO** · **Severidad era: alta** · encontrado migrando E3 en 4511
+**Estado: RESUELTO** · commits `c5bbc23` y `047cc99` · **Severidad era: alta** ·
+encontrado migrando E3 sobre el respaldo real en un origen aislado
 
 > Un defecto de E3, no de `main`. Sólo aparece con datos reales, porque hace
 > falta un respaldo escrito antes de que los campos existieran.
