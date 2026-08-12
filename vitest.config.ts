@@ -28,7 +28,9 @@ export default defineConfig({
   test: {
     // `api/` is covered too: the reminder decides what day it is in someone
     // else's time zone, which is exactly the kind of thing that is quietly wrong.
-    include: ['src/**/*.test.ts', 'api/**/*.test.ts'],
+    // `plugins/` too: the service worker is generated there, and T-003 showed
+    // that a caching rule nobody can execute is a caching rule nobody checks.
+    include: ['src/**/*.test.ts', 'api/**/*.test.ts', 'plugins/**/*.test.ts'],
     environment: 'node',
   },
 })

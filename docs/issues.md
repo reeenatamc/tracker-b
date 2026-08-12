@@ -6,6 +6,100 @@ de sitio y quitarle la única pista que había.
 
 ---
 
+## T-003 · Offline sólo abría la ruta en la que ya estabas
+
+**Estado: RESUELTO** · **Severidad era: media** · encontrado en el smoke test de 4510
+
+> Dos defectos en el mismo service worker, que se combinaban para producir un
+> síntoma que no se parecía a ninguno de los dos.
+
+### El síntoma
+
+Build de producción, origen limpio, worker activo, los 17 assets precacheados.
+Matas el servidor y recargas: la app abre entera. Navegas a otra ruta:
+
+```
+Failed to fetch dynamically imported module: /assets/history-BWkQwDV0.js
+```
+
+Lo que hacía el diagnóstico confuso: ese chunk **está** en la caché, y un `fetch()`
+del mismo URL desde la página devolvía **200 con 6945 bytes**. Un `fetch()` que
+responde 200 no demuestra que el módulo sea importable, y aquí es donde estaba la
+pista.
+
+### Causa raíz · `Vary` convierte el precache en un fallo
+
+`caches.match(request)` respeta la cabecera `Vary` de la respuesta guardada. Los
+assets se sirven con **`Vary: Origin`** —`vite preview` lo pone, y no es una
+rareza suya—. El precache los guarda con `cache.add(url)`, que construye una
+petición `mode: "no-cors"`, `credentials: "omit"` y **sin cabecera `Origin`**.
+
+Un **módulo** se pide en modo CORS, así que **sí** lleva `Origin`. La comparación
+de `Vary` falla y la entrada precacheada no se encuentra.
+
+Medido sobre el mismo URL, con el mismo worker, en el mismo instante, sin servidor:
+
+| petición | `destination` | `Origin` | rama del worker | resultado |
+|---|---|---|---|---|
+| `import()` | `script` | `http://localhost:4520` | `asset:failed` | **falla** |
+| `fetch()` | `""` | `null` | `asset:precache-hit` | 200 · 15 427 bytes |
+
+y en la que falla, `caches.match(request, { ignoreVary: true })` **sí** acierta.
+
+Con red, el fallo es invisible: el miss cae a la rama de red y la red responde.
+Sin red, el módulo no llega nunca. Y sólo muerde a los **chunks de ruta cargados
+en diferido**, porque son los únicos assets que se piden como módulo después de
+que el shell ya esté cargado — de ahí que la ruta de entrada funcionara y ninguna
+otra.
+
+`Content-Encoding: gzip` en las respuestas guardadas era una pista falsa: con
+`ignoreVary` el mismo módulo con la misma cabecera importa sin problema.
+
+### Segundo defecto · cada navegación se llevaba el shell
+
+La rama de navegación guardaba **toda** respuesta de navegación correcta bajo la
+clave `/`. Y `/` y `/history` no devuelven el mismo HTML: cada ruta trae sus
+propios `modulepreload`.
+
+```
+sólo en / :        routes-*.js, achievements-*.js, TickScale-*.js, safety-*.js
+sólo en /history:  history-*.js, photos-*.js
+```
+
+Así que visitar `/history` con red dejaba el shell de `/history` como shell
+offline de toda la app. Al abrir `/` sin red se cargaba un HTML que no menciona
+`routes-*.js`, la ruta lo pedía en diferido, y ahí se encontraba con el primer
+defecto. Los dos juntos son lo que hacía que el síntoma cambiara según por dónde
+hubieras pasado antes.
+
+### El arreglo
+
+Los assets se buscan con **`ignoreVary: true`**. Sus nombres llevan el hash del
+contenido, así que el URL es toda su identidad: nada en la petición puede elegir
+legítimamente otro cuerpo, y respetar `Vary` sólo puede hacer fallar una búsqueda
+que tenía que acertar.
+
+El shell sólo se refresca desde una navegación **a `/`**. Las demás siguen yendo
+a la red primero y cayendo al shell guardado cuando no hay, pero ya no se
+convierten en él.
+
+### Lo que lo protege
+
+`plugins/service-worker.test.ts` ejecuta el worker generado de verdad contra una
+`CacheStorage` falsa que implementa la semántica de `Vary`, y conduce peticiones
+reales por su manejador de `fetch`. Con el código anterior falla; con el nuevo,
+pasa. Cubre las tres cosas: que un módulo con `Origin` acierte en el precache,
+que una petición con destino `script` nunca reciba el shell, y que una navegación
+a otra ruta no reemplace el shell guardado.
+
+### Cómo se comprobó a mano
+
+Origen nuevo, build limpia, y los tres escenarios que pediste: producción con
+servidor vivo y worker; con servidor muerto y worker; y con servidor muerto sin
+worker, que falla como control.
+
+---
+
 ## T-002 · Las reconciliaciones de arranque corrían sobre una base vacía
 
 **Estado: RESUELTO** · **Severidad era: alta** · encontrado validando el restore pre-E3
