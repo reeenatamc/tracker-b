@@ -78,7 +78,13 @@ export function planRecovery(input: RecoveryInput): RecoveryPlan {
 		// A session naming a snapshot that is not there is not the same as one naming
 		// none: the reference is a claim that something existed, so its absence is a
 		// loss and never a reason to deduce a plan.
-		if (session.snapshotId !== null && !byId.has(session.snapshotId)) {
+		//
+		// `?? null` matters more here than anywhere. A restored pre-E3 row has no
+		// `snapshotId` key, and `undefined !== null` is true — which turned "never
+		// had one" into "pointed at one and it is gone", the loudest verdict the
+		// module can produce, for the most ordinary row there is.
+		const names = session.snapshotId ?? null;
+		if (names !== null && !byId.has(names)) {
 			plan.violations.push({
 				sessionId: session.id,
 				date: session.date,

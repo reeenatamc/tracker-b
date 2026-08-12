@@ -78,7 +78,10 @@ export function inForce(
 	return visible.filter((entry) => {
 		if (entry.kind === "revoke") return false;
 		if (entry.effectiveOn > asOf.effectiveOn) return false;
-		if (entry.onlyInPhase !== null && entry.onlyInPhase !== phase) return false;
+		// Absent means "every phase", exactly as null does. Comparing strictly
+		// would make a gate nobody set exclude every phase instead of none.
+		const gate = entry.onlyInPhase ?? null;
+		if (gate !== null && gate !== phase) return false;
 		return !lifted.has(entry.id);
 	});
 }
@@ -215,7 +218,7 @@ export function validateAdjustments(
 	for (const entry of live) {
 		if (entry.kind !== "replace_exercise") continue;
 		const alarms = liveSafetyByEntry.get(entry.entryId) ?? [];
-		if (alarms.length > 0 && entry.safetyResolution === null) {
+		if (alarms.length > 0 && (entry.safetyResolution ?? null) === null) {
 			problems.push({
 				code: "unresolved-safety-on-replace",
 				adjustmentId: entry.id,

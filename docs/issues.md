@@ -6,6 +6,88 @@ de sitio y quitarle la única pista que había.
 
 ---
 
+## T-004 · Restaurar un respaldo viejo lo hacía parecer nuevo
+
+**Estado: RESUELTO** · **Severidad era: alta** · encontrado migrando E3 en 4511
+
+> Un defecto de E3, no de `main`. Sólo aparece con datos reales, porque hace
+> falta un respaldo escrito antes de que los campos existieran.
+
+### Lo que pasó
+
+Migración E3 sobre una copia del respaldo real, en un origen aislado:
+
+```
+baselineSeeded        26
+phaseAdjustments       0
+overrideAdjustments    0
+sessionsMarkedLegacy   0     ← eran 2
+```
+
+y la recuperación denunciaba las dos sesiones reales:
+
+```
+21551819  2026-08-10  snapshot-unresolvable
+61bf95ef  2026-08-11  snapshot-unresolvable
+```
+
+«Esta sesión apuntaba a una instantánea y ha desaparecido», sobre sesiones que
+nunca tuvieron ninguna.
+
+### Causa raíz · ausente no es lo mismo que `null`
+
+Las filas de un respaldo anterior a E3 **no traen las claves**: no vienen a
+`null`, vienen sin existir, porque el campo no existía cuando se escribió el
+archivo.
+
+```
+"prescriptionContract" in sesión → false
+"snapshotId" in sesión           → false
+```
+
+Y E3 comparaba con `=== null` / `!== null`, que es falso para `undefined`:
+
+| sitio | qué hacía |
+|---|---|
+| `markLegacy` | `prescriptionContract === null` → salta justo las filas que la migración existe para marcar |
+| `planRecovery` | `snapshotId !== null` → `undefined !== null` es **true** → «instantánea desaparecida» |
+| `inForce` | `onlyInPhase !== null` → una compuerta que nadie puso excluiría todas las fases |
+| `validateAdjustments` | `safetyResolution === null` → una resolución ausente parecería puesta |
+
+Los dos últimos eran latentes: los ajustes son nativos de E3 y Zod los rellena.
+Se corrigen igual, porque la regla es la misma.
+
+### Y debajo · restaurar no es escribir
+
+`importBackup` escribía por la colección normal, así que `syncable` sellaba cada
+fila con `schemaVersion: 3`. Eso destruye la única prueba que distingue «fila
+vieja, el campo no existía» de «fila escrita bajo E3 que perdió su campo» — y la
+segunda es una corrupción que hay que denunciar.
+
+Con las comparaciones arregladas pero el sello puesto, una sesión de agosto
+restaurada hoy seguiría clasificándose como fila de E3 rota. El arreglo de la
+comparación sin el del sello no habría bastado.
+
+Ahora la restauración pasa por `raw`, tal cual el archivo la trae: sin
+`schemaVersion` en el archivo, sin `schemaVersion` en la base. Las migraciones de
+arranque corren antes de que nada lea o sincronice —T-002 puso ese orden— así
+que una fila vieja puede conservar su metadata ausente sin riesgo hasta que la
+migración la nombre.
+
+**RESTORE ≠ CREATE.** Rellenar el hueco con la versión de hoy, porque hoy es
+cuando pulsaste el botón, es el mismo defecto con otro sombrero.
+
+### Lo que lo protege
+
+`src/lib/restore-legacy.test.ts` cubre los seis casos con fixtures que **omiten**
+la propiedad en vez de ponerla a `null` — una prueba que escriba
+`{ prescriptionContract: null }` pasa con el código roto. Respaldo anterior a E3,
+respaldo de schema 2, respaldo de E3 en regla, fila de schema 3 corrupta,
+restauración que no cambia metadatos, e importar dos veces. Con el código
+anterior fallan seis.
+
+---
+
 ## T-003 · Offline sólo abría la ruta en la que ya estabas
 
 **Estado: RESUELTO** · **Severidad era: media** · encontrado en el smoke test de 4510

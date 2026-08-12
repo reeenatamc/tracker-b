@@ -12,6 +12,7 @@
  */
 
 import type { Collections } from "@/db/collections";
+import { persisted } from "@/db/durability";
 import { readPhotoUrl, savePhoto } from "@/lib/photos";
 
 const FORMAT = "operacion-tesis-backup";
@@ -95,6 +96,20 @@ export async function exportBackup(
  * Restores a backup, keyed by id, so importing the same file twice is harmless
  * and importing an older one never deletes what you have logged since. Records
  * already present are overwritten by the backup's version.
+ *
+ * **A restore is not a write.** Rows go in through `raw`, byte for byte as the
+ * file holds them, so whatever metadata they carry — or do not carry — survives.
+ * The normal path stamps every write with the current `schemaVersion`, and doing
+ * that here would date a session from August as if it had been written under E3
+ * today. That stamp is the only evidence distinguishing "old row, the field did
+ * not exist yet" from "row written under E3 that lost its field", and the second
+ * is a corruption worth shouting about. Restoring must not manufacture the first
+ * into the second.
+ *
+ * So: no `schemaVersion` in the file means no `schemaVersion` in the database,
+ * and the bootstrap migrations — which run before anything reads or syncs — get
+ * to see the row as old and name it `legacy`. Filling the gap in with today's
+ * version here would be the same defect wearing a different hat.
  */
 export async function importBackup(
 	collections: Collections,
@@ -120,6 +135,7 @@ export async function importBackup(
 
 	let sessions = 0;
 	let sets = 0;
+	const written: Array<{ isPersisted?: { promise?: Promise<unknown> } }> = [];
 
 	for (const key of COLLECTION_KEYS) {
 		const rows = (parsed.records?.[key] ?? []) as Array<
@@ -134,12 +150,17 @@ export async function importBackup(
 					? { ...row, photoId: remapped.get(row.photoId) ?? row.photoId }
 					: row;
 
-			upsert(collections[key], id, value);
+			// Through `raw`: the unwrapped collection, which does not stamp.
+			written.push(upsert(collections.raw[key], id, value));
 
 			if (key === "sessions") sessions++;
 			if (key === "sets") sets++;
 		}
 	}
+
+	// A restore that has not reached the disk has restored nothing, and this is
+	// the one moment where losing it means losing everything.
+	await Promise.all(written.map((transaction) => persisted(transaction)));
 
 	return { sessions, sets, photos: remapped.size, bytes: file.size };
 }
@@ -155,21 +176,28 @@ export async function importBackup(
  */
 type UpsertTarget = {
 	has(id: string): boolean;
-	insert(value: Record<string, unknown>): unknown;
-	update(id: string, mutate: (draft: Record<string, unknown>) => void): unknown;
+	insert(value: Record<string, unknown>): {
+		isPersisted?: { promise?: Promise<unknown> };
+	};
+	update(
+		id: string,
+		mutate: (draft: Record<string, unknown>) => void,
+	): { isPersisted?: { promise?: Promise<unknown> } };
 };
 
 function upsert(
 	collection: unknown,
 	id: string,
 	value: Record<string, unknown>,
-): void {
+): { isPersisted?: { promise?: Promise<unknown> } } {
 	const target = collection as UpsertTarget;
 	if (target.has(id)) {
-		target.update(id, (draft) => Object.assign(draft, value));
-	} else {
-		target.insert(value);
+		// `Object.assign` copies what the file has and leaves alone what it does
+		// not mention — so a row already carrying E3 metadata keeps it, and one
+		// that predates E3 does not acquire any.
+		return target.update(id, (draft) => Object.assign(draft, value));
 	}
+	return target.insert(value);
 }
 
 /** Triggers the browser's own save dialog. */

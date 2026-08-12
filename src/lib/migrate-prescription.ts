@@ -284,7 +284,13 @@ export function buildOverrideAdjustments(
 export function markLegacy(
 	sessions: readonly SessionRecord[],
 ): SessionRecord[] {
-	return sessions.filter((session) => session.prescriptionContract === null);
+	// `?? null`, not `=== null`. A session restored from a pre-E3 backup does not
+	// carry this key at all — the field did not exist when the file was written —
+	// so a strict comparison against `null` skips exactly the rows the migration
+	// exists for. Absent and null are the same statement here: nobody has said.
+	return sessions.filter(
+		(session) => (session.prescriptionContract ?? null) === null,
+	);
 }
 
 // ------------------------------------------------------------------- the run
