@@ -180,9 +180,11 @@ describe("G4 · E3 no trae motor", () => {
 	});
 
 	/**
-	 * Todo ajuste nace de una acción tuya. El único sitio que escribe en el log es
-	 * la pantalla de plan y la hoja de ajustes, las dos con un motivo escrito a
-	 * mano — y la migración, que es de una vez.
+	 * Todo ajuste nace de algo que dijiste tú. Escriben en el log el ejecutor y la
+	 * pantalla de plan —los dos con un motivo escrito a mano—, la migración, que
+	 * traduce lo que el programa ya traía, y la reconciliación de herencia, que
+	 * copia lo que declaraste con `inheritsFrom`. Ninguno propone nada: los cuatro
+	 * escriben una decisión que ya existía en otra parte.
 	 */
 	it("sólo escriben ajustes los sitios donde tú decides", () => {
 		const writers = ALL.filter(([, source]) =>
@@ -191,9 +193,26 @@ describe("G4 · E3 no trae motor", () => {
 
 		expect(writers.sort()).toEqual([
 			"lib/migrate-prescription.ts",
+			"lib/reconcile-phases.ts",
 			"routes/index.tsx",
 			"routes/plan.tsx",
 		]);
+	});
+
+	/**
+	 * Y la herencia no es una excepción a G4: se limita a copiar la capa
+	 * programática. Si alguna vez copiase `safety`, estaría afirmando por su cuenta
+	 * un juicio clínico sobre una fase que nadie ha entrenado.
+	 */
+	it("la herencia copia sólo lo programático", () => {
+		const source = readFileSync(
+			join(SRC, "domain", "inherit-phase.ts"),
+			"utf8",
+		);
+		expect(source).toContain('origin === "program"');
+		for (const origin of ["safety", "manual", "review", "coach"]) {
+			expect(source, origin).not.toContain(`origin === "${origin}"`);
+		}
 	});
 });
 
@@ -201,43 +220,69 @@ describe("G4 · E3 no trae motor", () => {
 
 describe("registrar lo que pasó no cambia el plan", () => {
 	const executor = readFileSync(join(SRC, "routes", "index.tsx"), "utf8");
+	const writes = readFileSync(join(SRC, "lib", "session-writes.ts"), "utf8");
 
-	/** Criterio 9. Guardar una serie escribe en `sets` y en nada más. */
+	/**
+	 * Criterio 9, dicho donde de verdad se cumple: las desviaciones de una sesión
+	 * pasan todas por un módulo que sólo sabe escribir en `sessions`. No es que hoy
+	 * no toquen el plan — es que desde ahí no se puede.
+	 */
+	it("las desviaciones viven en un módulo que no conoce el plan", () => {
+		for (const collection of [
+			"planAdjustments",
+			"prescriptionBaseline",
+			"planSnapshots",
+		]) {
+			expect(writes, collection).not.toContain(collection);
+		}
+		expect(writes).toContain("collections.sessions.update");
+	});
+
+	it("saltar y añadir pasan por ahí", () => {
+		const skip = between(
+			executor,
+			"async function skip(",
+			"async function restore",
+		);
+		const add = between(
+			executor,
+			"async function addCustomExercise",
+			"async function addFinisher",
+		);
+
+		expect(skip).toContain("skipExercise(collections");
+		expect(add).toContain("addToSession(collections");
+	});
+
+	/** Guardar una serie escribe en `sets` y en nada más. */
 	it("guardar una serie no toca el plan", () => {
-		const saveSet = executor.slice(
-			executor.indexOf("async function saveSet"),
-			executor.indexOf("async function savePlanChange"),
+		const saveSet = between(
+			executor,
+			"async function saveSet",
+			"async function savePlanChange",
 		);
 		expect(saveSet).not.toContain("planAdjustments");
 		expect(saveSet).not.toContain("prescriptionBaseline");
 	});
 
-	it("saltar un ejercicio tampoco: queda en la sesión", () => {
-		const skip = executor.slice(
-			executor.indexOf("async function skipExercise"),
-			executor.indexOf("function restoreExercise"),
-		);
-		expect(skip).toContain("skippedExerciseIds");
-		expect(skip).not.toContain("planAdjustments");
-	});
-
-	it("ni añadir un ejercicio suelto", () => {
-		const add = executor.slice(
-			executor.indexOf("async function addCustomExercise"),
-			executor.indexOf("async function addFinisher"),
-		);
-		expect(add).toContain("extraExerciseIds");
-		expect(add).not.toContain("planAdjustments");
-	});
-
 	/** Y al revés: cambiar el plan no escribe nada en la sesión de hoy. */
 	it("cambiar el plan no toca la sesión", () => {
-		const change = executor.slice(
-			executor.indexOf("async function savePlanChange"),
-			executor.indexOf("async function skipExercise"),
+		const change = between(
+			executor,
+			"async function savePlanChange",
+			"async function skip(",
 		);
 		expect(change).toContain("planAdjustments.insert");
 		expect(change).not.toContain("collections.sessions");
 		expect(change).not.toContain("collections.sets");
 	});
 });
+
+/** The body between two markers, so a rename fails loudly instead of silently. */
+function between(source: string, from: string, to: string): string {
+	const start = source.indexOf(from);
+	const end = source.indexOf(to);
+	if (start === -1) throw new Error(`no está «${from}» en el ejecutor`);
+	if (end === -1) throw new Error(`no está «${to}» en el ejecutor`);
+	return source.slice(start, end);
+}

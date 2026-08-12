@@ -734,6 +734,23 @@ export const Provenance = z.discriminatedUnion("kind", [
 		/** The effective date did not come from the data: the migration set it. */
 		assumedEffectiveOn: z.boolean(),
 	}),
+	/**
+	 * Copied from the phase this one says it inherits from, when it was created.
+	 *
+	 * The alternative was for the resolver to walk `inheritsFrom` on every read,
+	 * and that has a property nobody wants: editing B would silently move C months
+	 * later, with no event anywhere saying C changed. Materialising once makes the
+	 * inheritance a set of decisions with a date, and leaves C independent
+	 * afterwards — which is the same reason snapshots keep numbers, not references.
+	 *
+	 * Both fields are the audit trail: which phase it came from, and which exact
+	 * adjustment it is a copy of. The second is what makes reconciling idempotent.
+	 */
+	z.object({
+		kind: z.literal("inherited"),
+		inheritedFromPhaseId: PhaseId,
+		sourceAdjustmentId: z.string().min(1),
+	}),
 ]);
 export type Provenance = z.infer<typeof Provenance>;
 

@@ -149,14 +149,18 @@ function Today() {
 	 * slot anybody adjusts, so it is built on the spot. See `rehabAsEntry`.
 	 */
 	const snapshot = session ? activeSnapshot(planSnapshots, session.id) : null;
-	const plan = strengthTemplate
-		? { baseline: prescriptionBaseline, adjustments: planAdjustments }
-		: {
-				baseline: (rehab?.exercises ?? []).map((entry, index) =>
+	const plan = {
+		// Rehab rows are built here rather than seeded, because the protocol is
+		// indexed by week and nobody migrated it. Their ids are stable all the same
+		// — `rehab_<id>` from the protocol's own id — so a rehab slot is a slot like
+		// any other, and gets the same adjustment log as everything else.
+		baseline: strengthTemplate
+			? prescriptionBaseline
+			: (rehab?.exercises ?? []).map((entry, index) =>
 					rehabAsEntry(entry, template?.id ?? "cardio_ankle", index + 1),
 				),
-				adjustments: [],
-			};
+		adjustments: planAdjustments,
+	};
 	const livePrescription: PrescriptionEntry[] = template
 		? resolvePrescription(
 				plan.baseline,

@@ -43,6 +43,7 @@ const REPORTS = {
 	},
 	phases: { sessionsMigrated: 0, eventsSeeded: 0, unmapped: [] },
 	seed: { inserted: 0, updated: 0, revived: 0, removed: 0 },
+	inheritance: { created: 0, byPhase: {} },
 };
 
 vi.mock("@/lib/migrate-exercise-ids", () => ({
@@ -53,6 +54,9 @@ vi.mock("@/lib/migrate-phase-ids", () => ({
 }));
 vi.mock("@/lib/seed", () => ({
 	syncSeed: (c: never) => record("seed")(c),
+}));
+vi.mock("@/lib/reconcile-phases", () => ({
+	reconcilePhaseInheritance: (c: never) => record("inheritance")(c),
 }));
 
 import { bootstrap, hydrate } from "@/db/bootstrap";
@@ -124,7 +128,7 @@ describe("la barrera de hidratación", () => {
 
 		await bootstrap(collections, PROGRAM);
 
-		expect(seen).toHaveLength(3);
+		expect(seen).toHaveLength(4);
 		for (const step of seen) {
 			expect(step.sets, `${step.step} vio la base a medias`).toBe(43);
 			expect(step.sessions, `${step.step} vio la base a medias`).toBe(3);
@@ -160,7 +164,7 @@ describe("la barrera de hidratación", () => {
 		const collections = makeCollections(0, 0);
 		const report = await bootstrap(collections, PROGRAM);
 		expect(report.hydrated.sets).toBe(0);
-		expect(seen).toHaveLength(3);
+		expect(seen).toHaveLength(4);
 	});
 });
 
@@ -169,7 +173,12 @@ describe("la barrera de hidratación", () => {
 describe("el orden de arranque", () => {
 	it("migra ids, luego fases, y sólo entonces compara la semilla", async () => {
 		await bootstrap(makeCollections(5, 1), PROGRAM);
-		expect(seen.map((s) => s.step)).toEqual(["exercises", "phases", "seed"]);
+		expect(seen.map((s) => s.step)).toEqual([
+			"exercises",
+			"phases",
+			"seed",
+			"inheritance",
+		]);
 	});
 
 	/**
@@ -190,6 +199,18 @@ describe("el orden de arranque", () => {
 	it("informa de lo que había tras hidratar", async () => {
 		const report = await bootstrap(makeCollections(43, 3), PROGRAM);
 		expect(report.hydrated).toEqual({ sessions: 3, sets: 43, phaseEvents: 0 });
+	});
+
+	/**
+	 * La herencia de fases es el paso que E3 añadió, y está sujeta a la misma
+	 * barrera que todo lo demás: materializarla contra una base a medias
+	 * escribiría ajustes copiados de un log que aún no ha terminado de llegar.
+	 */
+	it("la herencia de fases también espera a la barrera", async () => {
+		await bootstrap(makeCollections(43, 3), PROGRAM);
+		const step = seen.find((s) => s.step === "inheritance");
+		expect(step?.sets).toBe(43);
+		expect(step?.sessions).toBe(3);
 	});
 });
 

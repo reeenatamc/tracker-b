@@ -194,3 +194,55 @@ describe("un write crítico no puede volver a ser fuego y olvido", () => {
 		await expect(persistedHelper(rejecting)).resolves.toBe(false);
 	});
 });
+
+/**
+ * E3 puso un `await` antes de insertar la serie: una sesión no acepta series
+ * hasta que ella y su instantánea están en disco. Eso abre una duda razonable
+ * —¿espera al disco sólo la primera?— y la respuesta tiene que ser comprobable,
+ * no razonada. `ensureSession` decide *a qué sesión* se engancha la serie;
+ * `persisted` es lo que espera a que la escritura aterrice, y va en todas.
+ */
+describe("T-001 sigue en pie después de E3", () => {
+	const executor = readFileSync(join(SRC, "routes", "index.tsx"), "utf8");
+	const saveSet = executor.slice(
+		executor.indexOf("async function saveSet"),
+		executor.indexOf("async function savePlanChange"),
+	);
+
+	it("la función existe y se pudo aislar", () => {
+		expect(saveSet).toContain("collections.sets.insert");
+	});
+
+	it("envuelve su transacción en persisted()", () => {
+		expect(saveSet).toContain("persisted(transaction)");
+	});
+
+	/**
+	 * Dos salidas: la de aproximación o trabajo cronometrado, que sale antes, y la
+	 * de serie de trabajo, que arranca el descanso. Si sólo una esperase, media
+	 * sesión volvería a estar a un apagón de desaparecer.
+	 */
+	it("y la espera en sus dos salidas, no sólo en una", () => {
+		expect(saveSet.match(/await landed/g) ?? []).toHaveLength(2);
+	});
+
+	it("ningún `return` se va sin haber esperado", () => {
+		const early = saveSet.split("return;").length - 1;
+		const awaited = saveSet.split(/await landed;\s*\n\s*return;/).length - 1;
+		expect(awaited).toBe(early);
+	});
+
+	/** Y el arranque de sesión espera sus dos escrituras, en ese orden. */
+	it("la instantánea se persiste antes que la sesión, y las dos se esperan", () => {
+		const startFresh = executor.slice(
+			executor.indexOf("async function startFresh"),
+			executor.indexOf("async function beginSession"),
+		);
+		const snapshotAt = startFresh.indexOf("planSnapshots.insert");
+		const sessionAt = startFresh.indexOf("collections.sessions.insert");
+
+		expect(snapshotAt).toBeGreaterThan(-1);
+		expect(sessionAt).toBeGreaterThan(snapshotAt);
+		expect(startFresh.match(/await persisted\(/g) ?? []).toHaveLength(2);
+	});
+});

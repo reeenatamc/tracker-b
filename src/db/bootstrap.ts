@@ -19,8 +19,10 @@
  */
 
 import type { Program } from "@/domain/schema";
+import { todayIso } from "@/lib/format";
 import { migrateExerciseIds } from "@/lib/migrate-exercise-ids";
 import { migratePhaseIds } from "@/lib/migrate-phase-ids";
+import { reconcilePhaseInheritance } from "@/lib/reconcile-phases";
 import { syncSeed } from "@/lib/seed";
 import type { Collections } from "./collections";
 
@@ -68,18 +70,26 @@ export type BootstrapReport = {
 	exercises: ReturnType<typeof migrateExerciseIds>;
 	phases: ReturnType<typeof migratePhaseIds>;
 	seed: ReturnType<typeof syncSeed>;
+	inheritance: ReturnType<typeof reconcilePhaseInheritance>;
 };
+
+/** Passed in so a test can pin the day without pinning the whole clock. */
+export type BootstrapClock = { today?: string; now?: number };
 
 /**
  * Local startup, start to finish. Resolves only when the database is fit to read.
  *
  * The order is deliberate and is the second half of the fix:
  *
- *   1. hydrate            — nothing below may see a partial database
- *   2. migrateExerciseIds — legacy ids become current ids
- *   3. migratePhaseIds    — numeric phases become named ones
- *   4. syncSeed           — compares against rows the two steps above have fixed
- *   5. (further reconciliations go here, after the migrations, before ready)
+ *   1. hydrate                    — nothing below may see a partial database
+ *   2. migrateExerciseIds         — legacy ids become current ids
+ *   3. migratePhaseIds            — numeric phases become named ones
+ *   4. syncSeed                   — compares rows the two steps above have fixed
+ *   5. reconcilePhaseInheritance  — writes down what a new phase inherited
+ *
+ * Step 5 is also reachable on its own, because a phase can arrive by sync rather
+ * than by being created here — see `reconcilePhaseInheritance`, which is
+ * idempotent precisely so both doors lead to the same place.
  *
  * The seed goes *after* the migrations on purpose. It compares stored rows
  * against the spreadsheet's, and comparing against un-migrated ones makes every
@@ -93,6 +103,7 @@ export type BootstrapReport = {
 export async function bootstrap(
 	collections: Collections,
 	program: Program,
+	clock: BootstrapClock = {},
 ): Promise<BootstrapReport> {
 	const waited = await hydrate(collections);
 
@@ -107,6 +118,12 @@ export async function bootstrap(
 	const exercises = migrateExerciseIds(collections);
 	const phases = migratePhaseIds(collections, program);
 	const seed = syncSeed(collections);
+	const inheritance = reconcilePhaseInheritance(
+		collections,
+		program,
+		clock.today ?? todayIso(),
+		clock.now ?? Date.now(),
+	);
 
-	return { hydrated, exercises, phases, seed };
+	return { hydrated, exercises, phases, seed, inheritance };
 }

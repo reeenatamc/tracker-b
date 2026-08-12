@@ -6,6 +6,9 @@
  */
 
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
+import { program } from "@/lib/content";
+import { todayIso } from "@/lib/format";
+import { reconcilePhaseInheritance } from "@/lib/reconcile-phases";
 import { createSyncClient, type SyncState } from "@/lib/sync-client";
 import { useCollections } from "./provider";
 
@@ -24,7 +27,21 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 	);
 
 	useEffect(() => {
-		const client = createSyncClient(collections, setState);
+		const client = createSyncClient(collections, setState, (received) => {
+			// A pull can bring a phase this device has never seen. Writing down what
+			// it inherits is the same reconciliation the bootstrap runs, and it is
+			// idempotent, so arriving here twice costs nothing.
+			if (received === 0) return;
+			const inherited = reconcilePhaseInheritance(
+				collections,
+				program,
+				todayIso(),
+				Date.now(),
+			);
+			if (inherited.created > 0) {
+				console.info("Herencia de fases tras sincronizar:", inherited);
+			}
+		});
 		setApi({ syncNow: () => void client.syncNow(), schedule: client.schedule });
 		return () => client.stop();
 	}, [collections]);

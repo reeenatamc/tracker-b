@@ -71,6 +71,16 @@ function stampOf(row: Row): { updatedAt: number; deletedAt: number | null } {
 export function createSyncClient(
 	collections: Collections,
 	onState: (state: SyncState) => void,
+	/**
+	 * Runs after a pull that landed, with how many rows arrived.
+	 *
+	 * A pull can bring in a phase this device has never seen, and a phase that
+	 * declares `inheritsFrom` has to have that inheritance written down before
+	 * anything reads its prescription. Startup is one door into that
+	 * reconciliation; this is the other, and it is idempotent so both lead to the
+	 * same place.
+	 */
+	onPulled: (received: number) => void = () => {},
 ) {
 	let mark = Number(localStorage.getItem(MARK_KEY) ?? 0);
 	let lastSyncedAt: number | null = null;
@@ -186,6 +196,9 @@ export function createSyncClient(
 			localStorage.setItem(MARK_KEY, String(mark));
 
 			lastSyncedAt = Date.now();
+			// Before the state goes idle: a screen that re-renders on "idle" should
+			// already be looking at a reconciled plan, not at one mid-repair.
+			onPulled(incoming.length);
 			onState({ status: "idle", lastSyncedAt });
 		} catch (error) {
 			const message =
