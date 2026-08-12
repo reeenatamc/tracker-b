@@ -62,6 +62,12 @@ import {
 import type { CustomExercise, Exercise, SetRecord } from "@/domain/schema";
 import { program } from "@/lib/content";
 import { formatDate, formatTarget, todayIso } from "@/lib/format";
+import {
+	addToSession,
+	restoreExercise,
+	skipExercise,
+	startSession,
+} from "@/lib/session-writes";
 
 export const Route = createFileRoute("/")({ component: Today });
 
@@ -151,11 +157,12 @@ function Today() {
 		return { id, persisted: persisted(transaction) };
 	}
 
-	function startSession() {
-		const id = ensureSession();
-		collections.sessions.update(id, (draft) => {
-			draft.startedAt ??= Date.now();
-		});
+	async function beginSession() {
+		const session = ensureSession();
+		await Promise.all([
+			session.persisted,
+			persisted(startSession(collections, session.id, Date.now())),
+		]);
 	}
 
 	async function finishSession() {
@@ -258,32 +265,27 @@ function Today() {
 		}
 	}
 
-	function skipExercise(exerciseId: string) {
-		const id = ensureSession();
-		collections.sessions.update(id, (draft) => {
-			draft.skippedExerciseIds = [
-				...new Set([...draft.skippedExerciseIds, exerciseId]),
-			];
-		});
+	async function skip(exerciseId: string) {
+		const session = ensureSession();
+		await Promise.all([
+			session.persisted,
+			persisted(skipExercise(collections, session.id, exerciseId)),
+		]);
 	}
 
-	function restoreExercise(exerciseId: string) {
+	async function restore(exerciseId: string) {
 		if (!session) return;
-		collections.sessions.update(session.id, (draft) => {
-			draft.skippedExerciseIds = draft.skippedExerciseIds.filter(
-				(id) => id !== exerciseId,
-			);
-		});
+		await persisted(restoreExercise(collections, session.id, exerciseId));
 	}
 
-	function addCustomExercise(custom: CustomExercise) {
-		collections.customExercises.insert(custom);
-		const id = ensureSession();
-		collections.sessions.update(id, (draft) => {
-			draft.extraExerciseIds = [
-				...new Set([...draft.extraExerciseIds, custom.id]),
-			];
-		});
+	async function addCustomExercise(custom: CustomExercise) {
+		const created = collections.customExercises.insert(custom);
+		const session = ensureSession();
+		await Promise.all([
+			session.persisted,
+			persisted(created),
+			persisted(addToSession(collections, session.id, custom.id)),
+		]);
 	}
 
 	async function addFinisher(custom: CustomExercise, minutes: number) {
@@ -291,11 +293,7 @@ function Today() {
 			collections.customExercises.insert(custom);
 		}
 		const session = ensureSession();
-		collections.sessions.update(session.id, (draft) => {
-			draft.extraExerciseIds = [
-				...new Set([...draft.extraExerciseIds, custom.id]),
-			];
-		});
+		const attached = addToSession(collections, session.id, custom.id);
 		const transaction = collections.sets.insert({
 			id: crypto.randomUUID(),
 			sessionId: session.id,
@@ -309,7 +307,11 @@ function Today() {
 			anklePain: null,
 			note: null,
 		});
-		await Promise.all([session.persisted, persisted(transaction)]);
+		await Promise.all([
+			session.persisted,
+			persisted(attached),
+			persisted(transaction),
+		]);
 	}
 
 	const exercises = template
@@ -484,7 +486,7 @@ function Today() {
 						<SessionClock
 							startedAt={session?.startedAt ?? null}
 							endedAt={session?.endedAt ?? null}
-							onStart={startSession}
+							onStart={beginSession}
 							onFinish={finishSession}
 							canFinish={done.size > 0}
 						/>
@@ -595,7 +597,7 @@ function Today() {
 											</span>
 											<button
 												type="button"
-												onClick={() => restoreExercise(exercise.id)}
+												onClick={() => restore(exercise.id)}
 												className="text-[0.8125rem] text-reserve"
 											>
 												Reponer
@@ -659,7 +661,7 @@ function Today() {
 						setSettingsFor(null);
 					}}
 					onSkip={() => {
-						skipExercise(settingsFor.id);
+						skip(settingsFor.id);
 						setSettingsFor(null);
 					}}
 					onReset={() => {
@@ -696,11 +698,16 @@ function Today() {
 			{editingNotes ? (
 				<SessionNotes
 					value={session?.notes ?? ""}
-					onSave={(notes) => {
-						const id = ensureSession();
-						collections.sessions.update(id, (draft) => {
-							draft.notes = notes.trim() || null;
-						});
+					onSave={async (notes) => {
+						const session = ensureSession();
+						await Promise.all([
+							session.persisted,
+							persisted(
+								collections.sessions.update(session.id, (draft) => {
+									draft.notes = notes.trim() || null;
+								}),
+							),
+						]);
 						setEditingNotes(false);
 					}}
 					onClose={() => setEditingNotes(false)}
