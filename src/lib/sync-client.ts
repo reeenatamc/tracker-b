@@ -119,44 +119,57 @@ export function createSyncClient(
 		onState({ status: "syncing" });
 
 		try {
-			const changes: Change[] = [];
-			/*
-			 * Which rows were sent only because they had never been stamped. They
-			 * are marked as accepted after the exchange lands, and not before: a
-			 * push that fails has to leave them owed.
-			 */
-			const firstPush: Array<{ key: CollectionKey; id: string }> = [];
+			/** What this device owes the server, given a cursor. */
+			function collect(from: number) {
+				const changes: Change[] = [];
+				/*
+				 * Which rows were sent only because they had never been stamped. They
+				 * are marked as accepted after the exchange lands, and not before: a
+				 * push that fails has to leave them owed.
+				 */
+				const firstPush: Array<{ key: CollectionKey; id: string }> = [];
 
-			for (const key of SYNCED_COLLECTIONS) {
-				for (const row of collections.raw[key].toArray as unknown as Row[]) {
-					const { updatedAt, deletedAt } = stampOf(row);
-					const owed = awaitingFirstPush(row);
+				for (const key of SYNCED_COLLECTIONS) {
+					for (const row of collections.raw[key].toArray as unknown as Row[]) {
+						const { updatedAt, deletedAt } = stampOf(row);
+						const owed = awaitingFirstPush(row);
 
-					// An unstamped row is owed its first push whatever the mark says.
-					// Comparing it against the cursor is what used to lose it: the row
-					// is not "older than the last sync", it has never been in one.
-					if (!owed && updatedAt <= mark) continue;
+						// An unstamped row is owed its first push whatever the mark says.
+						// Comparing it against the cursor is what used to lose it: the row
+						// is not "older than the last sync", it has never been in one.
+						if (!owed && updatedAt <= from) continue;
 
-					changes.push({
-						collection: key,
-						id: row.id,
-						updatedAt,
-						deletedAt,
-						data: row,
-					});
-					if (owed) firstPush.push({ key, id: row.id });
+						changes.push({
+							collection: key,
+							id: row.id,
+							updatedAt,
+							deletedAt,
+							data: row,
+						});
+						if (owed) firstPush.push({ key, id: row.id });
+					}
 				}
+
+				return { changes, firstPush };
 			}
 
-			const response = await fetch(ENDPOINT, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					since: mark,
-					changes,
-					schemaVersion: SYNC_SCHEMA_VERSION,
-				}),
-			});
+			async function exchange(from: number, changes: Change[]) {
+				return fetch(ENDPOINT, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						since: from,
+						changes,
+						schemaVersion: SYNC_SCHEMA_VERSION,
+					}),
+				});
+			}
+
+			let from = mark;
+			let collected = collect(from);
+			let changes = collected.changes;
+			let firstPush = collected.firstPush;
+			let response = await exchange(from, changes);
 
 			// An outdated client is turned away rather than allowed to write records
 			// this version cannot read. Losing sync for a day is an inconvenience;
@@ -188,7 +201,57 @@ export function createSyncClient(
 				throw new Error(detail);
 			}
 
-			const body = (await response.json()) as { changes?: Change[] };
+			let body = (await response.json()) as {
+				changes?: Change[];
+				highWaterMark?: number;
+			};
+
+			/*
+			 * A cursor is only good while the server can account for the history it
+			 * points into.
+			 *
+			 * The cursor is a maximum over `updatedAt`, and the server answers "newer
+			 * than this" out of the same values — so if it holds nothing that new,
+			 * this device is asking about a history that server no longer has. That
+			 * happens when the database is restored from an older backup: every
+			 * client keeps asking from where it got to, the server has nothing past
+			 * it, and everyone converges on "nothing changed" forever. An empty
+			 * `changes` looks exactly the same in both cases, which is why the
+			 * server states its own end of history rather than leaving it to be
+			 * inferred from an absence.
+			 *
+			 * The answer is to stop trusting the cursor, not to stop trusting the
+			 * data: the exchange is repeated as a first sync — everything offered,
+			 * everything read, reconciled by id — and the merge rule does not change.
+			 * Per record the newer `updatedAt` still wins. A server that forgot does
+			 * not thereby get to decide. See §Recuperación in `docs/issues.md`.
+			 *
+			 * A server too old to state a watermark leaves this undecidable, and
+			 * undecidable is left alone rather than guessed at.
+			 */
+			const regressed =
+				from > 0 &&
+				typeof body.highWaterMark === "number" &&
+				body.highWaterMark < from;
+
+			if (regressed) {
+				from = 0;
+				collected = collect(from);
+				changes = collected.changes;
+				firstPush = collected.firstPush;
+				response = await exchange(from, changes);
+				if (!response.ok) {
+					// El cursor viejo sigue guardado: se reintenta entero, no a medias.
+					throw new Error(
+						`El servidor respondió ${response.status} al rehacer la sincronización.`,
+					);
+				}
+				body = (await response.json()) as {
+					changes?: Change[];
+					highWaterMark?: number;
+				};
+			}
+
 			const incoming = body.changes ?? [];
 
 			for (const change of incoming) {
@@ -231,14 +294,20 @@ export function createSyncClient(
 			// The mark comes from the records themselves, never the local clock —
 			// two devices' clocks disagree, and "newer than the newest I hold" is
 			// true whichever clock stamped it.
+			//
+			// The floor is the old cursor, except after a regression: there the whole
+			// point is that it may go backwards, and flooring it would put it right
+			// back past the end of the server's history.
 			mark = highWaterMark(
 				[...incoming, ...changes].map((change) => ({
 					id: change.id,
 					updatedAt: change.updatedAt,
 					deletedAt: change.deletedAt,
 				})),
-				mark,
+				regressed ? 0 : mark,
 			);
+			// Written only here: a cursor is stored after the exchange it describes
+			// has been applied, never before it.
 			localStorage.setItem(MARK_KEY, String(mark));
 
 			lastSyncedAt = Date.now();

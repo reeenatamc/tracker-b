@@ -6,6 +6,72 @@ de sitio y quitarle la única pista que había.
 
 ---
 
+## T-008 · Un cursor puede apuntar más allá de la historia del servidor
+
+**Estado: RESUELTO** · rama `fix-t008-cursor` · **Severidad era: alta** · encontrado en la
+validación distribuida de E4, al vaciar la base de pruebas por detrás de los clientes
+
+### Qué es `mark` hoy
+
+Lo genera el dispositivo que escribe: `stamp()` pone `updatedAt: Date.now()`. El cliente lo
+avanza con `highWaterMark([...incoming, ...changes], mark)` — un máximo con suelo. Sus
+propiedades reales son dos: **nunca baja** y **es ≥ que todo `updatedAt` que ha visto**. No
+es una secuencia del servidor ni un reloj compartido. El servidor responde
+`where updated_at > since`, sacado de los mismos valores.
+
+### El fallo
+
+Un cursor sólo vale mientras el servidor pueda justificar la historia a la que apunta, y
+hasta ahora no podía. Restaura la base desde una copia vieja y cada cliente sigue pidiendo
+desde donde llegó; el servidor no tiene nada posterior; todos convergen en «no ha cambiado
+nada» para siempre. Las filas anteriores al cursor que el servidor perdió no vuelven jamás,
+y nadie se entera, porque **desde el cliente eso es idéntico a que no haya novedades**: un
+`changes` vacío.
+
+### El arreglo
+
+El servidor publica un `highWaterMark` autoritativo —`max(updated_at)` sobre todo lo que
+conserva, cero si no conserva nada— y el cliente compara:
+
+```
+storedClientMark <= serverHighWatermark   → pull incremental normal
+storedClientMark >  serverHighWatermark   → la historia del servidor retrocedió
+```
+
+Sin relojes: los dos lados viven en el mismo dominio de valores, así que no hizo falta una
+época aparte. La invariante que lo sostiene —tras cualquier intercambio con éxito,
+`serverMax >= clientMark`— depende de que cliente y servidor coincidan en qué colecciones
+existen; eso es T-005, y por eso este arreglo va después de aquél.
+
+**Se lee antes del push.** Leído después, los propios cambios del cliente elevarían el
+watermark por encima de su cursor y taparían justo el retroceso que sirve para detectar: el
+dispositivo que empuja en cada intercambio sería el que nunca se entera.
+
+### Política de recuperación
+
+Se deja de confiar en **el cursor**, no en los datos. El intercambio se repite como una
+primera sincronización: se ofrece todo, se lee todo, se reconcilia por id. **La regla de
+mezcla no cambia** — por registro gana el `updatedAt` más nuevo, como siempre.
+
+Quién gana, entonces: el dato más nuevo, y nunca «el servidor porque es el servidor». El
+servidor es un relevo, no un archivo: todo lo que hay en él vino de un dispositivo, y las
+copias que perduran están en los dispositivos y en los respaldos. Un servidor que olvidó no
+gana autoridad por haber olvidado.
+
+Consecuencia deliberada, y por eso está escrita aquí: **un retroceso del servidor se
+repuebla desde los clientes.** Si algún día se quisiera revertir el servidor *a propósito*,
+hay que revertir también los dispositivos; el servidor solo no puede decidirlo. Lo que no
+se hace es mezclar las dos cosas por accidente — «recuperar lo que queda» y «repoblar» son
+el mismo intercambio precisamente porque es una primera sincronización, no dos modos.
+
+El cursor nuevo se guarda **sólo después** de aplicar lo recibido. Si el pull completo
+falla, el cursor viejo sigue en pie y se reintenta entero.
+
+Un servidor demasiado viejo para declarar su watermark deja esto indecidible, e
+indecidible se deja en paz en vez de adivinarlo.
+
+---
+
 ## T-007 · Restaurar un respaldo vuelve a comprimir las fotos
 
 **Estado: ABIERTO** · **Severidad: media** · encontrado validando el upgrade E3→E4 sobre

@@ -112,6 +112,20 @@ export async function POST(request: Request): Promise<Response> {
 				`;
 			}
 
+			/*
+			 * The newest stamp this server holds — read **before** the push, and over
+			 * everything rather than just what is newer than `since`.
+			 *
+			 * Before the push because it has to describe the history the client
+			 * arrived at. Read afterwards, a client's own changes would raise it past
+			 * that client's cursor and hide exactly the regression it exists to
+			 * reveal: the device that pushes on every exchange would be the one that
+			 * never notices the server went back.
+			 */
+			const [watermark] = await tx<Array<{ hwm: string }>>`
+				select coalesce(max(updated_at), 0)::text as hwm from records
+			`;
+
 			// Push. The guard in the WHERE clause is what makes this last-write-wins:
 			// an older copy arriving late leaves the newer row alone.
 			if (changes.length > 0) {
@@ -158,7 +172,7 @@ export async function POST(request: Request): Promise<Response> {
 				limit 5000
 			`;
 
-			return { rows } as const;
+			return { rows, hwm: Number(watermark?.hwm ?? 0) } as const;
 		});
 
 		if ("rejected" in result) {
@@ -166,6 +180,12 @@ export async function POST(request: Request): Promise<Response> {
 		}
 		const rows = result.rows;
 		return json({
+			/**
+			 * The end of the history this server can account for. A client whose
+			 * cursor sits past it is holding a cursor from a history this server no
+			 * longer has.
+			 */
+			highWaterMark: result.hwm,
 			// bigint arrives as a string from Postgres; the client compares numbers.
 			changes: rows.map((row) => ({
 				collection: row.collection,

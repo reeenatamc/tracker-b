@@ -69,6 +69,13 @@ function makeServer() {
 			changes?: Change[];
 		};
 
+		// Antes del push, como el endpoint real: si se leyera después, los propios
+		// cambios del cliente taparían el retroceso que esto sirve para detectar.
+		const highWaterMark = [...stored.values()].reduce(
+			(max, change) => Math.max(max, change.updatedAt),
+			0,
+		);
+
 		for (const change of body.changes ?? []) {
 			if (!SYNCED_COLLECTIONS.includes(change.collection as never)) continue;
 			const key = `${change.collection}:${change.id}`;
@@ -83,12 +90,21 @@ function makeServer() {
 			.filter((change) => change.updatedAt > since)
 			.sort((a, b) => a.updatedAt - b.updatedAt);
 
-		return new Response(JSON.stringify({ changes }), { status: 200 });
+		return new Response(JSON.stringify({ changes, highWaterMark }), {
+			status: 200,
+		});
 	}
 
 	return {
 		handle,
 		stored,
+		/** Una copia del servidor, para poder restaurarla más tarde. */
+		copia: () => new Map([...stored.entries()].map(([k, v]) => [k, { ...v }])),
+		restaurar: (copia: Map<string, Change>) => {
+			stored.clear();
+			for (const [k, v] of copia) stored.set(k, v);
+		},
+		vaciar: () => stored.clear(),
 		count: (collection: string) =>
 			[...stored.values()].filter((c) => c.collection === collection).length,
 		ids: (collection: string) =>
@@ -125,20 +141,53 @@ function stubDevice(mark?: number) {
 const filas = (device: Collections, name: string): Row[] =>
 	(device.raw as unknown as Record<string, { toArray: Row[] }>)[name].toArray;
 
+const insertar = (device: Collections, name: string, row: Row): void => {
+	(device.raw as unknown as Record<string, { insert(value: Row): unknown }>)[
+		name
+	].insert(row);
+};
+
 async function settle(): Promise<void> {
 	for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
 }
 
-/** Un dispositivo entero: su propio almacenamiento, su propia marca. */
+/**
+ * Un dispositivo entero, y su marca sobrevive entre sincronizaciones.
+ *
+ * Que no sobreviviera fue un fallo real de esta prueba: cada llamada arrancaba
+ * con la marca a cero, así que el escenario del retroceso pasaba sin arreglar
+ * nada. Un dispositivo que olvida su cursor no es un dispositivo.
+ */
+const almacenamientos = new WeakMap<object, Map<string, string>>();
+
 async function syncDevice(
 	collections: Collections,
 	server: ReturnType<typeof makeServer>,
 ) {
-	stubDevice();
+	let store = almacenamientos.get(collections);
+	if (!store) {
+		store = new Map<string, string>();
+		almacenamientos.set(collections, store);
+	}
+	vi.stubGlobal("localStorage", {
+		getItem: (k: string) => store.get(k) ?? null,
+		setItem: (k: string, v: string) => store.set(k, v),
+	});
+	vi.stubGlobal("navigator", { onLine: true });
+	vi.stubGlobal("window", {
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	});
+	vi.stubGlobal("document", {
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+		visibilityState: "visible",
+	});
 	vi.stubGlobal("fetch", vi.fn(server.handle));
 	const client = createSyncClient(collections, () => {});
 	await settle();
 	client.stop();
+	return Number(store.get(MARK_KEY) ?? 0);
 }
 
 // ------------------------------------------------------------- el fixture E3
@@ -417,5 +466,279 @@ describe("un ajuste creado en A aparece en B", () => {
 			id: "adj-nuevo",
 			reason: "la rodilla",
 		});
+	});
+});
+
+// ------------------------------------------------- T-008 · el cursor y la historia
+
+/**
+ * Un cursor sólo vale mientras el servidor pueda justificar la historia a la que
+ * apunta.
+ *
+ * El cursor es un máximo sobre `updatedAt`, y el servidor contesta «más nuevo
+ * que esto» sacándolo de los mismos valores. Si no conserva nada tan nuevo, este
+ * dispositivo está preguntando por una historia que ese servidor ya no tiene:
+ * pasa al restaurar la base desde una copia vieja. Cada cliente sigue pidiendo
+ * desde donde llegó, el servidor no tiene nada posterior, y todos convergen en
+ * «no ha cambiado nada» para siempre.
+ *
+ * Y desde el lado del cliente los dos casos son idénticos —un `changes` vacío—,
+ * que es justo por lo que el servidor dice dónde termina su historia en vez de
+ * dejarlo deducir de una ausencia.
+ *
+ * ── Política de recuperación ────────────────────────────────────────────────
+ * Se deja de confiar en el cursor, no en los datos. El intercambio se repite
+ * como una primera sincronización: se ofrece todo, se lee todo y se reconcilia
+ * por id. **La regla de mezcla no cambia**: por registro gana el `updatedAt` más
+ * nuevo, como siempre. Un servidor que olvidó no gana autoridad por haber
+ * olvidado — es un relevo, no un archivo, y las copias que perduran están en los
+ * dispositivos y en los respaldos.
+ *
+ * Consecuencia deliberada: un retroceso del servidor se repuebla desde los
+ * clientes. Si algún día se quisiera revertir el servidor *a propósito*, hay que
+ * revertir también los dispositivos; el servidor solo no puede decidirlo.
+ */
+describe("un cursor que apunta más allá de la historia del servidor", () => {
+	const CON_SELLO = (id: string, updatedAt: number): Row => ({
+		id,
+		date: "2026-08-10",
+		templateId: "full_body_a",
+		updatedAt,
+		deletedAt: null,
+	});
+
+	it("una sincronización normal no rehace el pull entero", async () => {
+		const server = makeServer();
+		const a = makeDevice({ sessions: [CON_SELLO("s1", 1000)] });
+		await syncDevice(a, server);
+
+		const espia = vi.fn(server.handle);
+		stubDevice(1000);
+		vi.stubGlobal("fetch", espia);
+		createSyncClient(
+			makeDevice({ sessions: [CON_SELLO("s1", 1000)] }),
+			() => {},
+		);
+		await settle();
+
+		const desdes = espia.mock.calls.map((c) => JSON.parse(c[1].body).since);
+		expect(desdes).not.toContain(0);
+		expect(desdes.every((d) => d === 1000)).toBe(true);
+	});
+
+	it("marca 1000 contra un servidor restaurado hasta 700: lo detecta y recupera", async () => {
+		const server = makeServer();
+		// El servidor sólo conserva hasta 700.
+		const b = makeDevice({
+			sessions: [CON_SELLO("vieja", 700)],
+		});
+		await syncDevice(b, server);
+
+		const espia = vi.fn(server.handle);
+		stubDevice(1000);
+		vi.stubGlobal("fetch", espia);
+		const a = makeDevice({ sessions: [CON_SELLO("mia", 1200)] });
+		createSyncClient(a, () => {});
+		await settle();
+
+		const desdes = espia.mock.calls.map((c) => JSON.parse(c[1].body).since);
+		expect(desdes, "tuvo que rehacerlo desde cero").toContain(0);
+		// Y recupera la fila anterior a su cursor, que el pull incremental jamás
+		// le habría devuelto.
+		expect(
+			filas(a, "sessions")
+				.map((r) => r.id)
+				.sort(),
+		).toEqual(["mia", "vieja"]);
+	});
+
+	it("un servidor vacío con marca local mayor que cero también es un retroceso", async () => {
+		const server = makeServer();
+		const espia = vi.fn(server.handle);
+		stubDevice(5000);
+		vi.stubGlobal("fetch", espia);
+
+		createSyncClient(
+			makeDevice({ sessions: [CON_SELLO("s1", 900)] }),
+			() => {},
+		);
+		await settle();
+
+		expect(espia.mock.calls.map((c) => JSON.parse(c[1].body).since)).toContain(
+			0,
+		);
+	});
+
+	it("si el pull completo falla, el cursor viejo sigue en pie y se reintenta", async () => {
+		const server = makeServer();
+		let fallar = true;
+		const espia = vi.fn(async (url: string, init: { body: string }) => {
+			const since = JSON.parse(init.body).since;
+			if (since === 0 && fallar) {
+				fallar = false;
+				return new Response("{}", { status: 500 });
+			}
+			return server.handle(url, init);
+		});
+		stubDevice(9000);
+		vi.stubGlobal("fetch", espia);
+
+		const a = makeDevice({ sessions: [CON_SELLO("s1", 900)] });
+		const client = createSyncClient(a, () => {});
+		await settle();
+
+		// No se guardó un cursor a medias.
+		expect(localStorage.getItem(MARK_KEY)).toBe("9000");
+
+		await client.syncNow();
+		await settle();
+
+		expect(Number(localStorage.getItem(MARK_KEY))).toBeLessThan(9000);
+	});
+
+	it("tras un pull completo con éxito el cursor es el correcto", async () => {
+		const server = makeServer();
+		await syncDevice(
+			makeDevice({ sessions: [CON_SELLO("vieja", 700)] }),
+			server,
+		);
+
+		stubDevice(1000);
+		vi.stubGlobal("fetch", vi.fn(server.handle));
+		createSyncClient(
+			makeDevice({ sessions: [CON_SELLO("mia", 1200)] }),
+			() => {},
+		);
+		await settle();
+
+		// El máximo real de lo que hay, no el cursor viejo ni un cero.
+		expect(Number(localStorage.getItem(MARK_KEY))).toBe(1200);
+	});
+
+	it("reconciliar dos veces no duplica", async () => {
+		const server = makeServer();
+		await syncDevice(
+			makeDevice({ sessions: [CON_SELLO("vieja", 700)] }),
+			server,
+		);
+
+		const a = makeDevice({ sessions: [CON_SELLO("mia", 1200)] });
+		stubDevice(1000);
+		vi.stubGlobal("fetch", vi.fn(server.handle));
+		const client = createSyncClient(a, () => {});
+		await settle();
+		await client.syncNow();
+		await settle();
+
+		const ids = filas(a, "sessions")
+			.map((r) => r.id)
+			.sort();
+		expect(ids).toEqual(["mia", "vieja"]);
+		expect(new Set(ids).size).toBe(ids.length);
+	});
+
+	it("dos dispositivos con marcas distintas convergen", async () => {
+		const server = makeServer();
+		await syncDevice(
+			makeDevice({ sessions: [CON_SELLO("comun", 500)] }),
+			server,
+		);
+
+		const a = makeDevice({ sessions: [CON_SELLO("de-a", 1100)] });
+		stubDevice(3000);
+		vi.stubGlobal("fetch", vi.fn(server.handle));
+		const ca = createSyncClient(a, () => {});
+		await settle();
+		ca.stop();
+
+		const b = makeDevice({ sessions: [CON_SELLO("de-b", 1300)] });
+		stubDevice(7000);
+		vi.stubGlobal("fetch", vi.fn(server.handle));
+		const cb = createSyncClient(b, () => {});
+		await settle();
+		cb.stop();
+
+		// A no vio a B todavía: una vuelta más y los dos tienen lo mismo.
+		stubDevice(Number(1100));
+		vi.stubGlobal("fetch", vi.fn(server.handle));
+		const ca2 = createSyncClient(a, () => {});
+		await settle();
+		ca2.stop();
+
+		const enA = filas(a, "sessions")
+			.map((r) => r.id)
+			.sort();
+		const enB = filas(b, "sessions")
+			.map((r) => r.id)
+			.sort();
+		expect(enA).toEqual(["comun", "de-a", "de-b"]);
+		expect(enB).toEqual(enA);
+	});
+});
+
+// ------------------------------------------- el escenario completo, de punta a punta
+
+/**
+ * A ↔ servidor ↔ B, copia del servidor, filas nuevas, y el servidor vuelve atrás.
+ *
+ * Qué gana: por registro, el `updatedAt` más nuevo — la misma regla de siempre.
+ * El retroceso invalida el cursor, no los hechos. Las filas posteriores a la
+ * copia siguen en los dispositivos y vuelven al servidor en el intercambio de
+ * recuperación, porque ese intercambio es una primera sincronización y ofrece
+ * todo lo que el dispositivo tiene.
+ */
+describe("el servidor vuelve a una copia vieja y los dos dispositivos siguen", () => {
+	it("detecta el retroceso y A y B convergen con lo que de verdad existe", async () => {
+		const server = makeServer();
+		const fila = (id: string, updatedAt: number): Row => ({
+			id,
+			date: "2026-08-10",
+			templateId: "full_body_a",
+			updatedAt,
+			deletedAt: null,
+		});
+
+		const a = makeDevice({ sessions: [fila("comun", 100)] });
+		const b = makeDevice();
+		await syncDevice(a, server);
+		await syncDevice(b, server);
+		expect(filas(b, "sessions").map((r) => r.id)).toEqual(["comun"]);
+
+		// La copia del servidor se toma aquí.
+		const copia = server.copia();
+
+		// Después cada uno añade lo suyo y los dos avanzan su marca.
+		// Por `raw` y con su sello puesto: aquí interesa el transporte, no el
+		// camino de escritura de la app, que ya tiene sus propias pruebas.
+		insertar(a, "sessions", fila("nueva-de-a", 900));
+		insertar(b, "sessions", fila("nueva-de-b", 950));
+		await syncDevice(a, server);
+		await syncDevice(b, server);
+		await syncDevice(a, server);
+		expect(server.count("sessions")).toBe(3);
+
+		// Y el servidor se restaura a la copia vieja: pierde las dos nuevas.
+		server.restaurar(copia);
+		expect(server.count("sessions")).toBe(1);
+
+		// Ninguno de los dos había perdido nada suyo.
+		await syncDevice(a, server);
+		await syncDevice(b, server);
+		await syncDevice(a, server);
+
+		const enA = filas(a, "sessions")
+			.map((r) => r.id)
+			.sort();
+		const enB = filas(b, "sessions")
+			.map((r) => r.id)
+			.sort();
+		expect(enA).toEqual(["comun", "nueva-de-a", "nueva-de-b"]);
+		expect(enB).toEqual(enA);
+		// Y el servidor vuelve a tenerlo todo, repoblado desde los dispositivos.
+		expect(server.ids("sessions")).toEqual([
+			"comun",
+			"nueva-de-a",
+			"nueva-de-b",
+		]);
 	});
 });
