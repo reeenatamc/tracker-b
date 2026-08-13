@@ -99,7 +99,7 @@ export function highWaterMark(
  * needs to know what a *record* was written under, not just what the peer is
  * running now.
  */
-export const SYNC_SCHEMA_VERSION = 3;
+export const SYNC_SCHEMA_VERSION = 4;
 
 export type VersionVerdict =
 	| { ok: true }

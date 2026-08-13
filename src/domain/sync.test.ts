@@ -260,3 +260,103 @@ describe("un cliente antiguo no escribe después del upgrade", () => {
 		expect(turn.serverVersion).toBe(2);
 	});
 });
+
+// ------------------------------------------------------------------ 3 → 4
+
+/**
+ * El salto que trae E4, con las mismas cuatro propiedades que se verificaron
+ * para 2 → 3.
+ *
+ * La compuerta no se rediseña: se ejercita. Una compuerta que sólo se ha probado
+ * para el salto anterior es una compuerta que no se ha probado — y ésta es la
+ * única cosa entre un cliente de E3 y una fila `ProgramVersion` que no sabe leer.
+ */
+describe("el salto de esquema 3 → 4", () => {
+	function serialise(clientVersions: number[], from = 3) {
+		let serverVersion = from;
+		return clientVersions.map((client) => {
+			const before = serverVersion;
+			const turn = takeTurn(client, serverVersion);
+			serverVersion = turn.serverVersion;
+			// «Subió» no es un campo del turno: es que el servidor quedó más alto
+			// que como estaba. Derivarlo evita inventar API para la prueba.
+			return { client, subio: turn.serverVersion > before, ...turn };
+		});
+	}
+
+	/** 1 · un cliente 3 contra un servidor 4 no lee ni escribe. */
+	it("un cliente 3 contra un servidor 4 es rechazado", () => {
+		expect(checkSchemaVersion(3, 4)).toEqual({
+			ok: false,
+			reason: "client-outdated",
+			required: 4,
+		});
+	});
+
+	it("y el rechazo llega antes de tocar nada: no admitido", () => {
+		const [turn] = serialise([3], 4);
+		expect(turn).toMatchObject({ admitted: false, required: 4 });
+	});
+
+	/** 2 · el upgrade es atómico: de dos clientes 4, sólo uno sube el servidor. */
+	it("dos clientes 4 contra un servidor 3: sólo uno hace el upgrade", () => {
+		const turns = serialise([4, 4], 3);
+
+		expect(turns.every((turn) => turn.admitted)).toBe(true);
+		expect(turns.filter((turn) => turn.subio)).toHaveLength(1);
+		expect(turns.at(-1)?.serverVersion).toBe(4);
+	});
+
+	/** 3 · después del upgrade no entra una escritura de 3, llegue cuando llegue. */
+	it("tras el upgrade, ningún cliente 3 entra en ningún orden", () => {
+		const orders = [
+			[3, 3, 4],
+			[3, 4, 3],
+			[4, 3, 3],
+			[4, 4, 3],
+			[3, 4, 4],
+			[4, 3, 4],
+		];
+
+		for (const order of orders) {
+			let serverVersion = 3;
+			for (const client of order) {
+				const upgraded = serverVersion === 4;
+				const turn = takeTurn(client, serverVersion);
+
+				if (upgraded && client === 3) {
+					expect(turn.admitted, `orden ${order.join(",")}`).toBe(false);
+				}
+				serverVersion = turn.serverVersion;
+			}
+		}
+	});
+
+	/** 4 · un rechazado no mueve la versión del servidor. */
+	it("un cliente rechazado deja el servidor donde estaba", () => {
+		const turn = takeTurn(3, 4);
+		expect(turn.admitted).toBe(false);
+		expect(turn.serverVersion).toBe(4);
+	});
+
+	it("y uno más nuevo todavía tampoco lo rompe: sube y ya", () => {
+		const [turn] = serialise([5], 4);
+		expect(turn).toMatchObject({ admitted: true, serverVersion: 5 });
+	});
+
+	/**
+	 * La constante local es lo que un cliente dice de sí mismo, no lo que el
+	 * servidor guarda. Bajarla en el cliente no baja `sync_meta` — ver §9 de
+	 * `docs/E4-versiones.md`, que describe el procedimiento en vez de prometer un
+	 * downgrade que no existe.
+	 */
+	it("volver a la constante 3 no baja el servidor: sigue en 4 y devuelve 409", () => {
+		let serverVersion = 3;
+		serverVersion = takeTurn(4, serverVersion).serverVersion;
+		expect(serverVersion).toBe(4);
+
+		const vuelta = takeTurn(3, serverVersion);
+		expect(vuelta).toMatchObject({ admitted: false, required: 4 });
+		expect(vuelta.serverVersion).toBe(4);
+	});
+});

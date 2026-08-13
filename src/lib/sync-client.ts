@@ -44,6 +44,14 @@ export type SyncState =
 	| { status: "syncing" }
 	| { status: "offline"; lastSyncedAt: number | null }
 	| { status: "error"; message: string; lastSyncedAt: number | null }
+	/**
+	 * This device is behind the server's schema, so the gate turned it away.
+	 *
+	 * Its own state and not an error: nothing is broken and retrying will not
+	 * help. What helps is updating this device, and saying so is more useful than
+	 * a red line that reads like the network failed.
+	 */
+	| { status: "outdated"; required: number; lastSyncedAt: number | null }
 	/** No database connected yet — everything still works, just locally. */
 	| { status: "unconfigured" };
 
@@ -177,11 +185,18 @@ export function createSyncClient(
 			if (response.status === 409) {
 				const body = (await response.json().catch(() => ({}))) as {
 					error?: string;
+					required?: number;
 				};
 				if (body.error === "client-outdated") {
-					throw new Error(
-						"Actualiza este dispositivo para sincronizar: los datos del servidor son más nuevos.",
-					);
+					// Not thrown as an error: the catch below would file it next to
+					// "no pudo conectar", and those are two different situations with
+					// two different things to do about them.
+					onState({
+						status: "outdated",
+						required: Number(body.required ?? 0),
+						lastSyncedAt,
+					});
+					return;
 				}
 			}
 

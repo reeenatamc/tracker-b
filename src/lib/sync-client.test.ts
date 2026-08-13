@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * What the client does when the server holds data it cannot read.
  *
@@ -128,7 +130,10 @@ describe("un cliente que no sabe leer lo guardado no sincroniza", () => {
 
 	/**
 	 * The 409 is the whole mechanism. If it surfaced as a generic error the user
-	 * would retry forever without knowing that updating is what fixes it.
+	 * would retry forever without knowing that updating is what fixes it — so it
+	 * gets its own state rather than a message inside the error one. E4 needed
+	 * that distinction: after the 3 → 4 upgrade this is what an E3 device sees,
+	 * and it is not a network failure.
 	 */
 	it("ante un 409 dice que hay que actualizar el dispositivo", async () => {
 		vi.stubGlobal(
@@ -148,8 +153,9 @@ describe("un cliente que no sabe leer lo guardado no sincroniza", () => {
 		await settle();
 
 		const last = states[states.length - 1];
-		expect(last.status).toBe("error");
-		expect(last).toMatchObject({ message: /actualiza este dispositivo/i });
+		expect(last.status).toBe("outdated");
+		// Y trae la versión que hace falta, para poder decirlo con un número.
+		expect(last).toMatchObject({ required: 2 });
 	});
 
 	it("no escribe nada de lo que venía en un intercambio rechazado", async () => {
@@ -391,5 +397,43 @@ describe("una fila sin `updatedAt` es una fila pendiente de su primer envío", (
 		await settle();
 
 		expect(sent(fetchMock, 1).map((c) => c.id)).toEqual(["vieja"]);
+	});
+});
+
+// ------------------------------------------------------------ 409 vs red
+
+/**
+ * Ir por detrás del servidor no es un fallo de red.
+ *
+ * La compuerta hace su trabajo y devuelve 409; reintentar no arregla nada y
+ * actualizar el dispositivo sí. Tratarlo como error genérico decía «no se pudo
+ * sincronizar» y dejaba a quien lo lee mirando el wifi.
+ */
+describe("un cliente por detrás del servidor", () => {
+	const source = readFileSync(
+		join(import.meta.dirname, "sync-client.ts"),
+		"utf8",
+	);
+
+	it("tiene su propio estado, no el de error", () => {
+		expect(source).toContain('status: "outdated"');
+	});
+
+	it("y no se lanza como excepción, que caería en el catch de red", () => {
+		const block = source.slice(
+			source.indexOf('body.error === "client-outdated"'),
+			source.indexOf('body.error === "client-outdated"') + 400,
+		);
+		expect(block).not.toContain("throw new Error");
+		expect(block).toContain("onState({");
+	});
+
+	it("la pantalla lo dice con otras palabras", () => {
+		const status = readFileSync(
+			join(import.meta.dirname, "..", "components", "SyncStatus.tsx"),
+			"utf8",
+		);
+		expect(status).toContain('state.status === "outdated"');
+		expect(status).toContain("actualízalo para sincronizar");
 	});
 });

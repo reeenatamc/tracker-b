@@ -25,13 +25,19 @@ export function SyncStatus() {
 				? "Sincronizando…"
 				: state.status === "offline"
 					? "Sin conexión · se guarda aquí"
-					: state.status === "error"
-						? state.message
-						: state.lastSyncedAt
-							? `Sincronizado ${timeAgo(state.lastSyncedAt)}`
-							: "Sin sincronizar todavía";
+					: state.status === "outdated"
+						? "Este dispositivo va por detrás · actualízalo para sincronizar"
+						: state.status === "error"
+							? state.message
+							: state.lastSyncedAt
+								? `Sincronizado ${timeAgo(state.lastSyncedAt)}`
+								: "Sin sincronizar todavía";
 
-	const tone = state.status === "error" ? "text-stop" : "text-faint";
+	// Ir por detrás no es un fallo de red, pero sí pide algo de ti: se marca.
+	const tone =
+		state.status === "error" || state.status === "outdated"
+			? "text-stop"
+			: "text-faint";
 
 	return (
 		<>
