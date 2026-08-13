@@ -50,6 +50,7 @@ export const COLLECTION_POLICY = {
 	prescriptionBaseline: "synced",
 	planAdjustments: "synced",
 	planSnapshots: "synced",
+	planVersions: "synced",
 } as const satisfies Record<string, CollectionPolicy>;
 
 export type CollectionName = keyof typeof COLLECTION_POLICY;

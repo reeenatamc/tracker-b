@@ -25,6 +25,7 @@ import type {
 	PhaseEvent,
 	PlanAdjustment,
 	PrescriptionBaseline,
+	ProgramVersion,
 	ProgressCheck,
 	SessionPlanSnapshot,
 	SessionRecord,
@@ -201,6 +202,22 @@ async function createCollections() {
 		}),
 	);
 
+	/**
+	 * Named captures of the plan. Append-only *and* immutable: never updated,
+	 * never deleted, never renamed. A version says "this is what there was, and
+	 * this is what I knew"; any later write over that row turns a fact into
+	 * something else wearing the same id, and every diff computed before it stops
+	 * reproducing.
+	 */
+	const planVersions = createCollection(
+		persistedCollectionOptions<ProgramVersion, string>({
+			id: "plan_versions",
+			getKey: (version) => version.id,
+			persistence,
+			schemaVersion: SCHEMA_VERSION,
+		}),
+	);
+
 	/*
 	 * `satisfies` and not a plain object: it is what makes a collection added
 	 * here without a policy in `domain/collection-policy.ts` a typecheck error
@@ -220,6 +237,7 @@ async function createCollections() {
 		prescriptionBaseline,
 		planAdjustments,
 		planSnapshots,
+		planVersions,
 	} satisfies Record<CollectionName, object>;
 
 	/**
@@ -258,6 +276,7 @@ async function createCollections() {
 		// `noUpdate` rather than `appendOnly`: snapshots may be collected, never
 		// edited. See `domain/snapshot.ts` for when collecting is allowed.
 		planSnapshots: noUpdate(write(planSnapshots)),
+		planVersions: appendOnly(write(planVersions)),
 		raw,
 	};
 }

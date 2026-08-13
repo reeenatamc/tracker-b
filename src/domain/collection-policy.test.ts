@@ -68,10 +68,10 @@ describe("toda colección de la base declara su política", () => {
 	});
 });
 
-// -------------------------------------------------------------- E3: las once
+// -------------------------------------------------------------- E4: las doce
 
-describe("en E3 sincronizan once colecciones", () => {
-	it("las siete originales más las cuatro que E2 y E3 añadieron", () => {
+describe("en E4 sincronizan doce colecciones", () => {
+	it("las siete originales, las cuatro de E2 y E3, y la de E4", () => {
 		expect(SYNCED_COLLECTIONS).toEqual([
 			"sessions",
 			"sets",
@@ -84,16 +84,21 @@ describe("en E3 sincronizan once colecciones", () => {
 			"prescriptionBaseline",
 			"planAdjustments",
 			"planSnapshots",
+			"planVersions",
 		]);
 	});
 
-	/** Las cuatro que llevaban desde E2 y E3 sin viajar. */
-	it("las cuatro que faltaban están dentro", () => {
+	/**
+	 * Las cuatro que llevaban desde E2 y E3 sin viajar, y la que E4 añade
+	 * ampliando la misma declaración en vez de abrir otra lista.
+	 */
+	it("las cinco que no estaban en la lista original están dentro", () => {
 		for (const name of [
 			"phaseEvents",
 			"prescriptionBaseline",
 			"planAdjustments",
 			"planSnapshots",
+			"planVersions",
 		] as CollectionName[]) {
 			expect(SYNCED_COLLECTIONS, name).toContain(name);
 		}

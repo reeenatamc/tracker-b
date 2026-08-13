@@ -16,6 +16,7 @@ import type {
 	PhaseEvent,
 	PlanAdjustment,
 	PrescriptionBaseline,
+	ProgramVersion,
 	ProgressCheck,
 	SessionPlanSnapshot,
 	SessionRecord,
@@ -72,6 +73,9 @@ export function useRecords() {
 	const { data: planSnapshots = [] } = useLiveQuery((q) =>
 		q.from({ s: collections.planSnapshots }),
 	);
+	const { data: planVersions = [] } = useLiveQuery((q) =>
+		q.from({ v: collections.planVersions }),
+	);
 
 	return {
 		collections,
@@ -86,5 +90,6 @@ export function useRecords() {
 		prescriptionBaseline: alive(prescriptionBaseline) as PrescriptionBaseline[],
 		planAdjustments: alive(planAdjustments) as PlanAdjustment[],
 		planSnapshots: alive(planSnapshots) as SessionPlanSnapshot[],
+		planVersions: alive(planVersions) as ProgramVersion[],
 	};
 }

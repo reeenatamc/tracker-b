@@ -83,6 +83,7 @@ const KEYS = [
 	"prescriptionBaseline",
 	"planAdjustments",
 	"planSnapshots",
+	"planVersions",
 ] as const;
 
 function makeCollections(seed: Partial<Record<string, Row[]>> = {}) {
@@ -134,6 +135,21 @@ const PHASE_EVENT: Row = {
 	createdAt: 1,
 };
 
+/**
+ * A named capture of the plan, with everything a restore has to give back
+ * untouched: the two id sets, the fingerprint, its size and the two dates.
+ */
+const VERSION: Row = {
+	id: "v3",
+	name: "v3",
+	cutAt: "2026-10-04",
+	knows: { adjustmentIds: ["A1", "R1"], phaseEventIds: ["E1"] },
+	createdAt: 1_760_000_000_000,
+	reason: "antes de cambiar el bloque",
+	baselineFingerprint: "abc123",
+	baselineSize: 26,
+};
+
 /** Turns an exported blob back into the File the importer expects. */
 function asFile(blob: Blob, name = "backup.json"): File {
 	return new File([blob], name, { type: "application/json" });
@@ -183,6 +199,7 @@ describe("ida y vuelta", () => {
 			prescriptionBaseline: [{ id: "slot_full_body_a_01", sets: 2 }],
 			planAdjustments: [{ id: "adj-1", entryId: "slot_full_body_a_01" }],
 			planSnapshots: [{ id: "snap-1", sessionId: SESSION.id, entries: [] }],
+			planVersions: [VERSION],
 		});
 
 		const { blob } = await exportBackup(source, "2026-08-11");
@@ -374,5 +391,49 @@ describe("un respaldo de E1 se recupera en E2", () => {
 		expect(roundTripped.sessions.toArray).toEqual(target.sessions.toArray);
 		// El log de fases viaja con él: sin esto, restaurar perdería las transiciones.
 		expect(roundTripped.phaseEvents.toArray).toHaveLength(4);
+	});
+});
+
+// -------------------------------------------------------------- versiones
+
+describe("una versión sobrevive al viaje sin que nadie la recalcule", () => {
+	/**
+	 * Lo que hay que comprobar aquí no es que viaje, sino que llegue **igual**.
+	 * Una versión es una afirmación sobre lo que se sabía; recalcular su corte al
+	 * restaurarla la convertiría en una afirmación sobre lo que se sabe hoy, que
+	 * es justo lo que la hace inútil.
+	 */
+	it("conserva corte, huella, tamaño y las dos fechas", async () => {
+		const source = makeCollections({ planVersions: [VERSION] });
+		const { blob } = await exportBackup(source, "2026-12-01");
+
+		const target = makeCollections();
+		await importBackup(target, asFile(blob));
+
+		expect(target.planVersions.toArray).toEqual([VERSION]);
+	});
+
+	it("y ni el orden de los ids se toca", async () => {
+		const desordenada: Row = {
+			...VERSION,
+			id: "v4",
+			knows: { adjustmentIds: ["Z", "A"], phaseEventIds: ["E9", "E1"] },
+		};
+		const source = makeCollections({ planVersions: [desordenada] });
+		const { blob } = await exportBackup(source, "2026-12-01");
+		const target = makeCollections();
+		await importBackup(target, asFile(blob));
+
+		expect(target.planVersions.toArray[0]).toEqual(desordenada);
+	});
+
+	it("importar dos veces no la duplica ni la altera", async () => {
+		const source = makeCollections({ planVersions: [VERSION] });
+		const { blob } = await exportBackup(source, "2026-12-01");
+		const target = makeCollections();
+		await importBackup(target, asFile(blob));
+		await importBackup(target, asFile(blob));
+
+		expect(target.planVersions.toArray).toEqual([VERSION]);
 	});
 });
