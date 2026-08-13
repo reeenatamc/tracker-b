@@ -6,6 +6,116 @@ de sitio y quitarle la única pista que había.
 
 ---
 
+## T-007 · Restaurar un respaldo vuelve a comprimir las fotos
+
+**Estado: ABIERTO** · **Severidad: media** · encontrado validando el upgrade E3→E4 sobre
+una copia del respaldo real
+
+`importBackup` recorre las fotos del archivo y llama a `savePhoto`, que empieza por
+`compress(file)`. Comprimir es lo correcto **al entrar una foto nueva** desde la cámara o
+el carrete; al restaurar no entra nada nuevo, sino que vuelve una foto que ya se guardó, y
+volver a comprimirla la degrada otra vez.
+
+Medido sobre la misma imagen a lo largo de una cadena de restauraciones:
+
+```
+respaldo original      277 053 bytes   sha 06c7e3bf…
+restaurado una vez     192 786         sha 69a22ad1…
+restaurado dos veces   192 794         sha 95dcbf85…
+restaurado tres veces  192 761         sha e26acf8e…
+```
+
+La primera pasada se lleva un 30 %. Las siguientes ya casi no cambian el tamaño pero sí
+los bytes, así que la pérdida es generacional: cada ciclo respaldo→restauración vuelve a
+codificar. Comprobado en un origen E3 puro y en uno E4: mismo resultado, así que es
+anterior a E4 y E4 no lo toca.
+
+Efecto lateral: `savePhoto` acuña un `photoId` nuevo y la fila de `inspo` se reapunta. Dos
+dispositivos que restauren el mismo respaldo acaban con ids distintos para la misma foto,
+y como las fotos son archivos de OPFS y no viajan por el sync, tras sincronizar uno de los
+dos apunta a una foto que no tiene.
+
+**El contrato que falta:** restaurar no es dar de alta una foto nueva. Una foto que ya
+estaba almacenada debe conservar sus bytes y su id; `savePhoto`/`compress` pertenecen al
+ingreso, no a la restauración. Es la misma distinción que T-004 hizo para las filas —
+RESTORE ≠ CREATE— aplicada a los archivos.
+
+No bloquea la reproducibilidad de `ProgramVersion`: la base de prescripción no incluye
+fotos y las huellas no dependen de ellas. Sí impide llamar al respaldo *lossless*.
+
+---
+
+## T-006 · «No hay endpoint» se decide leyendo el texto del error
+
+**Estado: ABIERTO** · **Severidad: baja** · encontrado montando los orígenes aislados de
+validación de E4
+
+`sync-client.ts` distingue «aquí no hay sync configurado» de «el sync falló» buscando
+`"404"` **dentro del mensaje de error**:
+
+```ts
+if (message.includes("DATABASE_URL") || message.includes("404")) {
+	onState({ status: "unconfigured" });
+}
+```
+
+Y ese mensaje sólo contiene `"404"` cuando la respuesta no traía JSON, porque unas líneas
+antes se prefiere el campo `error` del cuerpo si existe. Un servidor sin la ruta que
+responda `404 {"error": "..."}` acaba mostrándose como fallo de sincronización en vez de
+«Solo en este dispositivo».
+
+Funciona hoy por cómo responde el servidor de desarrollo, no por diseño: el código de
+estado ya está en la mano en ese punto y es la respuesta correcta a la pregunta.
+
+**Arreglo:** decidir por `response.status === 404`, no por el texto. Commit pequeño y
+aparte; no bloquea nada mientras haya un endpoint válido.
+
+---
+
+## T-005 · Cuatro colecciones no han sincronizado nunca
+
+**Estado: RESUELTO** · rama `fix-sync-transporte` · **Severidad era: alta** · encontrado
+en el paso F de la validación de E4, comparando lo que A tenía con lo que llegó al servidor
+
+`src/lib/sync-client.ts` declaraba su propia lista de colecciones y se quedó congelada en
+las siete originales desde que se escribió el sync. El endpoint y el respaldo sí fueron
+creciendo:
+
+| etapa | cliente | servidor |
+|---|---|---|
+| e1 | 7 | 7 |
+| e2 | 7 | 8 · `phaseEvents` |
+| t001 | 7 | 8 |
+| e3 | 7 | 11 · base, ajustes, instantáneas |
+| E4 (rama) | 7 | 12 · `planVersions` |
+
+Cada etapa añadió su colección donde se recibe y no donde se envía. El endpoint aceptaba
+cuatro colecciones que nadie mandaba. Nada falló nunca: los datos simplemente se quedaron
+en un dispositivo, que es la peor forma que puede tomar un defecto, porque el único
+síntoma es que el segundo dispositivo tiene un plan distinto y no lo dice.
+
+Medido: A tenía 26 filas de base, 2 ajustes, 4 eventos de fase y 3 instantáneas. Tras
+sincronizar, el servidor tenía 0 de cada una.
+
+**Segundo defecto, misma función.** Las filas escritas antes de que existiera el sync no
+llevan `updatedAt`. `stampOf` las leía como 0 y el envío se decidía con `updatedAt > mark`,
+que en un dispositivo recién estrenado es `0 > 0`. El comentario decía que esas filas «se
+empujan una vez»; no se empujaban nunca. De las 43 series reales, 25 no habían salido del
+dispositivo.
+
+**Arreglo.** Una sola declaración —`src/domain/collection-policy.ts`— de la que derivan el
+cliente, el endpoint y el respaldo. `raw` en `db/collections.ts` lleva
+`satisfies Record<CollectionName, object>`, así que una colección nueva sin política es un
+error de tipos en las dos direcciones. Y una regla dicha en voz alta en lugar de una
+comparación más ancha: **una fila sin `updatedAt` es una fila pendiente de su primer
+envío**, la mande quien la mande y esté donde esté el cursor. Viaja sellada a
+`LEGACY_STAMP = 1` —mayor que cero, porque el servidor devuelve lo posterior a `since` y
+una fila guardada en 0 no sale nunca para nadie— y al ser aceptada se le escribe ese sello
+por la misma vía interna que usan los registros que llegan, no por un `update` de dominio
+que una colección append-only tiene razón en rechazar.
+
+---
+
 ## T-004 · Restaurar un respaldo viejo lo hacía parecer nuevo
 
 **Estado: RESUELTO** · commits `c5bbc23` y `047cc99` · **Severidad era: alta** ·
