@@ -844,6 +844,68 @@ export const PrescriptionKnowledgeCut = z.object({
 export type PrescriptionKnowledgeCut = z.infer<typeof PrescriptionKnowledgeCut>;
 
 /**
+ * Everything a query is allowed to know about. E4 widens the cut to the phases.
+ *
+ * Two sets and not one, because they are two logs: a version can need to bound
+ * one without the other. `PrescriptionKnowledgeCut` is the degenerate case and
+ * is derived from this.
+ *
+ * What goes in is **what this device had present**, not what was in force —
+ * originals, corrections and revocations alike. A revocation prescribes nothing
+ * and is exactly what stops something else applying, so leaving it out would
+ * make the version resolve for more, silently and looking correct.
+ */
+export const ProgramKnowledgeCut = z.object({
+	adjustmentIds: z.array(z.string()),
+	phaseEventIds: z.array(z.string()),
+});
+export type ProgramKnowledgeCut = z.infer<typeof ProgramKnowledgeCut>;
+
+/**
+ * The plan as it stood on a day, according to what one device knew.
+ *
+ * Immutable, always: no update, no delete, no rename, no retire. A version is
+ * the statement "this is what there was, and this is what I knew". Any later
+ * write over that row turns a fact into something else with the same id, and
+ * every diff computed before it stops reproducing.
+ *
+ * `cutAt` is the day it resolves to — valid time, never in the future. It is not
+ * `createdAt`, which is only when the button was pressed and decides nothing.
+ * Confusing the two is the mistake this whole stage exists to not make.
+ */
+export const ProgramVersion = z.object({
+	id: z.string().min(1),
+	/** What you call it. Presentation, never identity, and never unique. */
+	name: z.string().min(1),
+	/** The day it resolves to. Never later than the day it was created. */
+	cutAt: IsoDate,
+	knows: ProgramKnowledgeCut,
+	/** For ordering on screen and for audit. Never for deciding. */
+	createdAt: z.number(),
+	/** Non-empty. A version with no reason is a name with no owner. */
+	reason: z.string().min(1),
+	/**
+	 * Proof of which baseline it resolved against.
+	 *
+	 * The cut bounds the logs; the baseline is not a log, it is a state, so it
+	 * cannot be bounded — it has to be *demonstrated*. Without this, two devices
+	 * with the same logs and different baselines would both answer `resolved`
+	 * with different plans, which is the failure this stage exists to prevent.
+	 */
+	baselineFingerprint: z.string().min(1),
+	/**
+	 * How many baseline rows there were.
+	 *
+	 * A hash alone cannot tell "I am missing baseline" from "I have a different
+	 * one": both give a different string. That distinction is exactly what
+	 * separates waiting for a sync from reporting a corruption, so it needs a
+	 * second, cheap fact.
+	 */
+	baselineSize: z.number().int().nonnegative(),
+});
+export type ProgramVersion = z.infer<typeof ProgramVersion>;
+
+/**
  * What a session had prescribed, frozen when it started.
  *
  * Self-contained on purpose: it stores resolved values, not references. Revoke
