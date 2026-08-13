@@ -95,6 +95,34 @@ export function applyRemote(
 }
 
 /**
+ * Records that a row has been accepted by the server, and nothing else.
+ *
+ * `updatedAt` is transport: it says when a copy was last written, so the other
+ * device can tell whose copy is newer. It is not a fact about training, and a
+ * row that predates sync has none — which is why it needs one before it can be
+ * placed in the exchange at all.
+ *
+ * Writes through the same unwrapped collection incoming records use, and for
+ * the same reason: an append-only log is right to refuse an edit, and this is
+ * not an edit to what the log says. Nothing in the record's meaning changes —
+ * hence one field, named in the signature, rather than a mutate callback that
+ * could touch anything.
+ */
+export function stampTransport(
+	collection: object,
+	id: string,
+	updatedAt: number,
+): void {
+	const target = collection as WritableCollection & {
+		has(id: string): boolean;
+	};
+	if (!target.has(id)) return;
+	target.update(id, (draft) => {
+		(draft as { updatedAt: number }).updatedAt = updatedAt;
+	});
+}
+
+/**
  * A collection that only ever grows.
  *
  * `syncable` gives every collection `updatedAt` and `deletedAt`, and that is

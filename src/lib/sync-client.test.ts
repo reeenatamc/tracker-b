@@ -21,7 +21,11 @@ vi.mock("@/lib/content", () => ({ program: PROGRAM }));
 import type { Collections } from "@/db/collections";
 import { SYNCED_COLLECTIONS } from "@/domain/collection-policy";
 import { SYNC_SCHEMA_VERSION } from "@/domain/sync";
-import { createSyncClient, type SyncState } from "@/lib/sync-client";
+import {
+	createSyncClient,
+	LEGACY_STAMP,
+	type SyncState,
+} from "@/lib/sync-client";
 
 // ------------------------------------------------------------------ the world
 
@@ -67,8 +71,12 @@ const SESSION: Row = {
 	deletedAt: null,
 };
 
-function stubWorld() {
+const MARK_KEY = "operacion-tesis:sync-mark";
+
+/** `mark` para arrancar con un dispositivo que ya sincronizó alguna vez. */
+function stubWorld(mark?: number) {
 	const store = new Map<string, string>();
+	if (mark !== undefined) store.set(MARK_KEY, String(mark));
 	vi.stubGlobal("localStorage", {
 		getItem: (k: string) => store.get(k) ?? null,
 		setItem: (k: string, v: string) => store.set(k, v),
@@ -236,5 +244,152 @@ describe("un cliente que no sabe leer lo guardado no sincroniza", () => {
 		const stored = collections.sessions.toArray[0];
 		expect(typeof stored.phase).toBe("string");
 		expect(stored.phase).not.toBe(2);
+	});
+});
+
+// ------------------------------------------------- filas anteriores al sync
+
+/**
+ * Rows written before sync existed carry no `updatedAt`, and the old code read
+ * that as zero and pushed on `updatedAt > mark`. On a device that had never
+ * synced that is `0 > 0`: false. The comment above it said those rows were
+ * "pushed once"; they were never pushed at all, and 25 of 43 real sets had been
+ * sitting on one device since the day sync was written.
+ *
+ * The fix is a stated rule rather than a wider comparison — a row with no
+ * timestamp of its own is owed its first push, whatever the cursor says — so
+ * these tests are about the rule holding in the four situations that matter.
+ */
+describe("una fila sin `updatedAt` es una fila pendiente de su primer envío", () => {
+	const LEGACY: Row = {
+		id: "vieja",
+		date: "2026-01-05",
+		templateId: "full_body_a",
+	};
+	const STAMPED: Row = { ...SESSION, id: "sellada", updatedAt: 5000 };
+
+	function acceptAll() {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(JSON.stringify({ changes: [] }), { status: 200 }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		return fetchMock;
+	}
+
+	const sent = (mock: ReturnType<typeof vi.fn>, call = 0) =>
+		JSON.parse(mock.mock.calls[call][1].body as string).changes as Array<{
+			id: string;
+			updatedAt: number;
+		}>;
+
+	it("con la marca en cero, se envía", async () => {
+		const fetchMock = acceptAll();
+		createSyncClient(makeCollections({ sessions: [LEGACY] }), () => {});
+		await settle();
+
+		expect(sent(fetchMock).map((c) => c.id)).toEqual(["vieja"]);
+	});
+
+	/**
+	 * Y viaja con un sello mayor que cero, que es la mitad que no se ve: el
+	 * servidor devuelve lo posterior a `since`, y una fila guardada en 0 no sale
+	 * nunca para nadie. Enviarla como 0 la habría dejado igual de aislada.
+	 */
+	it("y viaja con un sello que el servidor puede devolver", async () => {
+		const fetchMock = acceptAll();
+		createSyncClient(makeCollections({ sessions: [LEGACY] }), () => {});
+		await settle();
+
+		expect(sent(fetchMock)[0].updatedAt).toBe(LEGACY_STAMP);
+		expect(LEGACY_STAMP).toBeGreaterThan(0);
+	});
+
+	it("con la marca por delante, una fila restaurada después también se envía", async () => {
+		vi.unstubAllGlobals();
+		stubWorld(9_000_000);
+		const fetchMock = acceptAll();
+
+		createSyncClient(makeCollections({ sessions: [LEGACY] }), () => {});
+		await settle();
+
+		expect(sent(fetchMock).map((c) => c.id)).toEqual(["vieja"]);
+	});
+
+	it("mezcladas, llegan las que tocan y sólo esas", async () => {
+		vi.unstubAllGlobals();
+		stubWorld(6000);
+		const fetchMock = acceptAll();
+
+		createSyncClient(
+			makeCollections({
+				sessions: [
+					LEGACY,
+					STAMPED,
+					{ ...SESSION, id: "vieja-ya-vista", updatedAt: 3000 },
+				],
+				sets: [{ id: "serie-sin-sello", sessionId: "vieja" }],
+			}),
+			() => {},
+		);
+		await settle();
+
+		// `sellada` es 5000 y la marca 6000: ya la vio. Las dos sin sello, no.
+		expect(
+			sent(fetchMock)
+				.map((c) => c.id)
+				.sort(),
+		).toEqual(["serie-sin-sello", "vieja"]);
+	});
+
+	it("tras un envío aceptado deja de reenviarse", async () => {
+		const fetchMock = acceptAll();
+		const collections = makeCollections({ sessions: [LEGACY] });
+		const client = createSyncClient(collections, () => {});
+		await settle();
+
+		await client.syncNow();
+		await settle();
+
+		expect(sent(fetchMock, 0).map((c) => c.id)).toEqual(["vieja"]);
+		expect(sent(fetchMock, 1)).toEqual([]);
+	});
+
+	/** Y el sello queda en la fila, no en una lista aparte que un restore ignoraría. */
+	it("el sello se escribe en la propia fila", async () => {
+		acceptAll();
+		const collections = makeCollections({ sessions: [LEGACY] });
+		createSyncClient(collections, () => {});
+		await settle();
+
+		expect(collections.sessions.toArray[0]).toMatchObject({
+			id: "vieja",
+			updatedAt: LEGACY_STAMP,
+		});
+	});
+
+	it("si el envío falla, sigue debiéndose", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("se cayó la red"))
+			.mockResolvedValue(
+				new Response(JSON.stringify({ changes: [] }), { status: 200 }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+
+		const collections = makeCollections({ sessions: [LEGACY] });
+		const client = createSyncClient(collections, () => {});
+		await settle();
+
+		// No se marcó nada: el intercambio no llegó a ninguna parte.
+		expect(
+			(collections.sessions.toArray[0] as unknown as Row).updatedAt,
+		).toBeUndefined();
+
+		await client.syncNow();
+		await settle();
+
+		expect(sent(fetchMock, 1).map((c) => c.id)).toEqual(["vieja"]);
 	});
 });
