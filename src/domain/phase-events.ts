@@ -57,7 +57,41 @@ function targetOf(event: PhaseEvent): string | null {
  * them, not whichever the traversal reached first. Losing a corrupt fragment
  * beats hanging, and beats an answer that depends on array order.
  */
-export function liveEvents(events: readonly PhaseEvent[]): PhaseEvent[] {
+/**
+ * The ids a query is allowed to see. `null` means "everything present".
+ *
+ * E4 bounds the phase log the same way E3 bounds the adjustments, and for the
+ * same reason: without it, a retroactive correction written in December moves
+ * what a version captured in October says, and a version that changes on its own
+ * is not a version.
+ */
+export type PhaseEventCut = { phaseEventIds: readonly string[] } | null;
+
+/**
+ * The log narrowed to a cut. **Applied before anything reasons about liveness.**
+ *
+ * The order is the whole point. Computing liveness over the full log and
+ * filtering afterwards lets a correction the version never knew about annul an
+ * event it did know about, and the result is a plan nobody ever saw:
+ *
+ *   cut  = { E1, E2, E3 }        log = { E1, E2, E3, E4 },  E4 corrects E3
+ *   bad  → live({E1..E4}) kills E3 → filter → {E1, E2}
+ *   good → {E1,E2,E3} → live → E3 stands
+ */
+export function withinCut(
+	events: readonly PhaseEvent[],
+	cut: PhaseEventCut,
+): readonly PhaseEvent[] {
+	if (cut === null) return events;
+	const known = new Set(cut.phaseEventIds);
+	return events.filter((event) => known.has(event.id));
+}
+
+export function liveEvents(
+	events: readonly PhaseEvent[],
+	cut: PhaseEventCut = null,
+): PhaseEvent[] {
+	events = withinCut(events, cut);
 	const byId = new Map(events.map((event) => [event.id, event]));
 
 	/*
@@ -131,9 +165,12 @@ export function orderEvents<T extends PhaseMoveEvent>(
 }
 
 /** Live events that carry a destination, in resolution order. Revocations do not. */
-export function moves(events: readonly PhaseEvent[]): PhaseMoveEvent[] {
+export function moves(
+	events: readonly PhaseEvent[],
+	cut: PhaseEventCut = null,
+): PhaseMoveEvent[] {
 	return orderEvents(
-		liveEvents(events).filter(
+		liveEvents(events, cut).filter(
 			(event): event is PhaseMoveEvent => event.kind !== "revocation",
 		),
 	);
@@ -168,10 +205,12 @@ export function phaseForDate(
 	program: Program,
 	events: readonly PhaseEvent[],
 	date: IsoDate,
+	/** E4. Absent means "everything present", which is exactly E2's behaviour. */
+	cut: PhaseEventCut = null,
 ): Phase {
 	let current: Phase | null = null;
 
-	for (const move of moves(events)) {
+	for (const move of moves(events, cut)) {
 		if (move.occurredOn > date) break;
 		const phase = phaseByIdOrNull(program, move.toPhaseId);
 		// A dangling destination is reported by validateEvents, not resolved here.
@@ -186,10 +225,11 @@ export function phaseStartedOn(
 	program: Program,
 	events: readonly PhaseEvent[],
 	date: IsoDate,
+	cut: PhaseEventCut = null,
 ): IsoDate | null {
 	let start: IsoDate | null = null;
 
-	for (const move of moves(events)) {
+	for (const move of moves(events, cut)) {
 		if (move.occurredOn > date) break;
 		if (phaseByIdOrNull(program, move.toPhaseId)) start = move.occurredOn;
 	}
