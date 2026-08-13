@@ -16,6 +16,7 @@ import {
 	persistedCollectionOptions,
 } from "@tanstack/browser-db-sqlite-persistence";
 import { createCollection } from "@tanstack/react-db";
+import type { CollectionName } from "@/domain/collection-policy";
 import type {
 	AnkleCheck,
 	CustomExercise,
@@ -200,6 +201,13 @@ async function createCollections() {
 		}),
 	);
 
+	/*
+	 * `satisfies` and not a plain object: it is what makes a collection added
+	 * here without a policy in `domain/collection-policy.ts` a typecheck error
+	 * rather than a collection that quietly never syncs. Missing name, missing
+	 * policy — both fail, and neither fails silently. It keeps the precise types
+	 * of each collection, which an annotation would flatten.
+	 */
 	const raw = {
 		sessions,
 		sets,
@@ -212,7 +220,7 @@ async function createCollections() {
 		prescriptionBaseline,
 		planAdjustments,
 		planSnapshots,
-	};
+	} satisfies Record<CollectionName, object>;
 
 	/**
 	 * What the app writes through: every write is stamped and every delete

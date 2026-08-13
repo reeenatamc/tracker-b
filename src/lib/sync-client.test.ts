@@ -19,6 +19,7 @@ import { PROGRAM } from "@/domain/__fixtures__/program";
 vi.mock("@/lib/content", () => ({ program: PROGRAM }));
 
 import type { Collections } from "@/db/collections";
+import { SYNCED_COLLECTIONS } from "@/domain/collection-policy";
 import { SYNC_SCHEMA_VERSION } from "@/domain/sync";
 import { createSyncClient, type SyncState } from "@/lib/sync-client";
 
@@ -42,16 +43,12 @@ function makeCollection(rows: Row[] = []) {
 	};
 }
 
-const KEYS = [
-	"sessions",
-	"sets",
-	"ankleChecks",
-	"overrides",
-	"customExercises",
-	"progressChecks",
-	"inspo",
-	"phaseEvents",
-] as const;
+/*
+ * From the registry, not from a list written here. A fixture that names its own
+ * collections is the same defect one layer down: it would keep passing while
+ * the thing it stands in for stopped covering half the database.
+ */
+const KEYS = SYNCED_COLLECTIONS;
 
 function makeCollections(seed: Partial<Record<string, Row[]>> = {}) {
 	const built = Object.fromEntries(

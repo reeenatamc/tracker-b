@@ -17,6 +17,10 @@
 
 import type { Collections } from "@/db/collections";
 import { applyRemote } from "@/db/synced";
+import {
+	SYNCED_COLLECTIONS,
+	type SyncedCollection,
+} from "@/domain/collection-policy";
 import { highWaterMark, SYNC_SCHEMA_VERSION } from "@/domain/sync";
 import { program } from "@/lib/content";
 import { normalizeIncoming } from "@/lib/migrate-phase-ids";
@@ -25,17 +29,7 @@ const ENDPOINT = "/api/sync";
 const MARK_KEY = "operacion-tesis:sync-mark";
 const DEBOUNCE_MS = 4000;
 
-const COLLECTION_KEYS = [
-	"sessions",
-	"sets",
-	"ankleChecks",
-	"overrides",
-	"customExercises",
-	"progressChecks",
-	"inspo",
-] as const;
-
-type CollectionKey = (typeof COLLECTION_KEYS)[number];
+type CollectionKey = SyncedCollection;
 
 type Change = {
 	collection: CollectionKey;
@@ -104,7 +98,7 @@ export function createSyncClient(
 
 		try {
 			const changes: Change[] = [];
-			for (const key of COLLECTION_KEYS) {
+			for (const key of SYNCED_COLLECTIONS) {
 				for (const row of collections.raw[key].toArray as unknown as Row[]) {
 					const { updatedAt, deletedAt } = stampOf(row);
 					if (updatedAt > mark) {
@@ -163,7 +157,7 @@ export function createSyncClient(
 			const incoming = body.changes ?? [];
 
 			for (const change of incoming) {
-				if (!COLLECTION_KEYS.includes(change.collection)) continue;
+				if (!SYNCED_COLLECTIONS.includes(change.collection)) continue;
 
 				// Normalised on the way in. A device that has migrated can still be
 				// sent an old session by one that has not, and translating here means

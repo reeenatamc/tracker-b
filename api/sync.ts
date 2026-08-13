@@ -12,10 +12,8 @@
  * bundle, so it would be decoration rather than a control.
  */
 
-import {
-	checkSchemaVersion,
-	clientVersionOf,
-} from "../src/domain/sync";
+import { SYNCED_COLLECTIONS } from "../src/domain/collection-policy";
+import { checkSchemaVersion, clientVersionOf } from "../src/domain/sync";
 import { connect, type Db, json } from "./_db";
 
 type Change = {
@@ -33,19 +31,12 @@ type SyncRequest = {
 	schemaVersion?: number;
 };
 
-const COLLECTIONS = new Set([
-	"sessions",
-	"sets",
-	"ankleChecks",
-	"overrides",
-	"customExercises",
-	"progressChecks",
-	"inspo",
-	"phaseEvents",
-	"prescriptionBaseline",
-	"planAdjustments",
-	"planSnapshots",
-]);
+/**
+ * From the same declaration the client pushes from. Kept as a list here and a
+ * list there is what let the endpoint accept four collections nobody was
+ * sending, for three stages, without anything failing.
+ */
+const COLLECTIONS = new Set<string>(SYNCED_COLLECTIONS);
 
 let ready: Promise<void> | null = null;
 

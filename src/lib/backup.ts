@@ -13,6 +13,7 @@
 
 import type { Collections } from "@/db/collections";
 import { persisted } from "@/db/durability";
+import { BACKED_UP_COLLECTIONS } from "@/domain/collection-policy";
 import { readPhotoUrl, savePhoto } from "@/lib/photos";
 
 const FORMAT = "operacion-tesis-backup";
@@ -27,19 +28,8 @@ type Backup = {
 	photos: Record<string, string>;
 };
 
-const COLLECTION_KEYS = [
-	"sessions",
-	"sets",
-	"ankleChecks",
-	"overrides",
-	"customExercises",
-	"progressChecks",
-	"inspo",
-	"phaseEvents",
-	"prescriptionBaseline",
-	"planAdjustments",
-	"planSnapshots",
-] as const;
+/** From the one declaration, so a new collection cannot miss the backup either. */
+const COLLECTION_KEYS = BACKED_UP_COLLECTIONS;
 
 export type BackupSummary = {
 	sessions: number;
