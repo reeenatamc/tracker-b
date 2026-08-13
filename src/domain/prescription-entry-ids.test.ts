@@ -169,10 +169,15 @@ describe("G4 · E3 no trae motor", () => {
 		expect(found).toEqual([]);
 	});
 
-	/** Criterio 12b: E3 tampoco trae versionado. Eso es E4. */
-	it("ni versiones ni diff entre planes", () => {
+	/**
+	 * El versionado era la frontera de E3 y es el contenido de E4, así que esta
+	 * guarda se mueve en vez de borrarse: lo que ahora no puede existir es lo que
+	 * queda por detrás de E4. Una guarda que se retira sin sustituta deja de
+	 * proteger nada y nadie se entera.
+	 */
+	it("ni readiness, ni tendencias, ni auditoría muscular", () => {
 		const found = ALL.flatMap(([path, source]) =>
-			["ProgramVersion", "diffVersions", "planDiff"]
+			["readinessScore", "trendOf", "weeklyVolumeAudit", "muscleAudit"]
 				.filter((name) => source.includes(name))
 				.map((name) => `${short(path)}: ${name}`),
 		);

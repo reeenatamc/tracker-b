@@ -233,7 +233,9 @@ describe("la tabla no puede quedarse corta", () => {
 	 * campo `…Id` dentro de una variante, que no sea el `id` propio ni una lista,
 	 * tiene que estar declarado en `SEMANTIC_REFERENCES`.
 	 */
-	const declared = new Set(SEMANTIC_REFERENCES.map((r) => r.field));
+	const declared: ReadonlySet<string> = new Set<string>(
+		SEMANTIC_REFERENCES.map((r) => r.field),
+	);
 
 	it("cubre todo campo que nombra a otra fila del log de ajustes", () => {
 		const campos = [...unionBody("PlanAdjustment").matchAll(/\n\t+(\w+Id):/g)]
