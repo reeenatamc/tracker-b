@@ -13,7 +13,13 @@
 
 import { describe, expect, it } from "vitest";
 import { BASELINE, makeBaseline } from "./__fixtures__/plan";
-import type { PhaseEvent, PlanAdjustment, ProgramVersion } from "./schema";
+import { PROGRAM } from "./__fixtures__/program";
+import type {
+	PhaseEvent,
+	PlanAdjustment,
+	PrescriptionEntry,
+	ProgramVersion,
+} from "./schema";
 import {
 	baselineFingerprint,
 	type CaptureInput,
@@ -21,6 +27,7 @@ import {
 	captureProgramKnowledgeCut,
 	checkBaseline,
 	checkVersion,
+	resolveVersion,
 } from "./versions";
 
 const A1: PlanAdjustment = {
@@ -397,5 +404,197 @@ describe("comprobar una versión antes de resolverla", () => {
 
 		const resueltos = [unoOk, dosOk].filter((r) => r.kind === "ok");
 		expect(resueltos).toHaveLength(1);
+	});
+});
+
+// ------------------------------------------------------- resolver de verdad
+
+describe("resolver una versión entera", () => {
+	const HOY = "2026-12-01";
+
+	const sube = (
+		id: string,
+		value: number,
+		effectiveOn: string,
+		onlyInPhase: string | null = null,
+	): PlanAdjustment => ({
+		kind: "set_field",
+		id,
+		entryId: "slot_a_01",
+		change: { field: "sets", value },
+		effectiveOn,
+		onlyInPhase,
+		origin: "manual",
+		reason: "prueba",
+		evidenceIds: [],
+		provenance: { kind: "authored" },
+		createdAt: 0,
+	});
+
+	const entra = (
+		id: string,
+		toPhaseId: string,
+		occurredOn: string,
+	): PhaseEvent => ({
+		kind: "transition",
+		id,
+		fromPhaseId: null,
+		toPhaseId,
+		occurredOn,
+		plannedFor: occurredOn,
+		trigger: "planned",
+		reason: "",
+		reviewId: null,
+		createdAt: 0,
+	});
+
+	const version = async (
+		overrides: Partial<ProgramVersion> = {},
+	): Promise<ProgramVersion> => ({
+		id: "v3",
+		name: "v3",
+		cutAt: HOY,
+		knows: { adjustmentIds: [], phaseEventIds: [] },
+		createdAt: 0,
+		reason: "prueba",
+		baselineFingerprint: await baselineFingerprint(BASELINE),
+		baselineSize: BASELINE.length,
+		...overrides,
+	});
+
+	const sets = (plan: Map<string, PrescriptionEntry[]>) =>
+		plan.get("template_a")?.find((e) => e.id === "slot_a_01")?.sets;
+
+	it("sin ajustes conocidos, devuelve la base", async () => {
+		const result = await resolveVersion({
+			version: await version(),
+			adjustments: [sube("A1", 5, "2026-10-01")],
+			phaseEvents: [],
+			baseline: BASELINE,
+			program: PROGRAM,
+		});
+		expect(result.kind).toBe("resolved");
+		if (result.kind !== "resolved") return;
+		expect(sets(result.plan)).toBe(2);
+	});
+
+	it("con el ajuste en el corte, lo aplica", async () => {
+		const A1 = sube("A1", 5, "2026-10-01");
+		const result = await resolveVersion({
+			version: await version({
+				knows: { adjustmentIds: ["A1"], phaseEventIds: [] },
+			}),
+			adjustments: [A1],
+			phaseEvents: [],
+			baseline: BASELINE,
+			program: PROGRAM,
+		});
+		expect(result.kind).toBe("resolved");
+		if (result.kind !== "resolved") return;
+		expect(sets(result.plan)).toBe(5);
+	});
+
+	/** §6.1 del documento, literal: un ajuste viejo que llega mañana. */
+	it("un ajuste que llega después no la mueve", async () => {
+		const A1 = sube("A1", 5, "2026-10-01");
+		const A0 = sube("A0", 9, "2026-09-20");
+		const v3 = await version({
+			knows: { adjustmentIds: ["A1"], phaseEventIds: [] },
+		});
+
+		const antes = await resolveVersion({
+			version: v3,
+			adjustments: [A1],
+			phaseEvents: [],
+			baseline: BASELINE,
+			program: PROGRAM,
+		});
+		const despues = await resolveVersion({
+			version: v3,
+			adjustments: [A0, A1],
+			phaseEvents: [],
+			baseline: BASELINE,
+			program: PROGRAM,
+		});
+
+		expect(antes).toEqual(despues);
+		if (despues.kind !== "resolved") return;
+		expect(sets(despues.plan)).toBe(5);
+	});
+
+	/** §6.2: una corrección retroactiva de fase tampoco. */
+	it("una corrección de fase que no conocía no la mueve", async () => {
+		const E1 = entra("E1", "adaptacion", "2026-08-10");
+		const E3 = entra("E3", "progresion", "2026-09-15");
+		const E4: PhaseEvent = {
+			kind: "correction",
+			id: "E4",
+			supersedesId: "E3",
+			fromPhaseId: null,
+			toPhaseId: "recomposicion",
+			occurredOn: "2026-09-22",
+			plannedFor: "2026-09-15",
+			trigger: "planned",
+			reason: "",
+			reviewId: null,
+			createdAt: 1,
+		};
+		const soloEnProgresion = sube("P", 7, "2026-01-01", "progresion");
+
+		const v3 = await version({
+			knows: { adjustmentIds: ["P"], phaseEventIds: ["E1", "E3"] },
+		});
+
+		const conE4 = await resolveVersion({
+			version: v3,
+			adjustments: [soloEnProgresion],
+			phaseEvents: [E1, E3, E4],
+			baseline: BASELINE,
+			program: PROGRAM,
+		});
+		expect(conE4.kind).toBe("resolved");
+		if (conE4.kind !== "resolved") return;
+		// Sigue en progresión, así que el ajuste de esa fase sigue aplicando.
+		expect(sets(conE4.plan)).toBe(7);
+	});
+
+	it("nunca resuelve con la base sin demostrar", async () => {
+		const otra = [makeBaseline({ sets: 9 }), BASELINE[1]];
+		const result = await resolveVersion({
+			version: await version(),
+			adjustments: [],
+			phaseEvents: [],
+			baseline: otra,
+			program: PROGRAM,
+		});
+		expect(result).toMatchObject({
+			kind: "invalid",
+			code: "baseline-mismatch",
+		});
+	});
+
+	it("y falta antes que no cuadra", async () => {
+		const result = await resolveVersion({
+			version: await version(),
+			adjustments: [],
+			phaseEvents: [],
+			baseline: [BASELINE[0]],
+			program: PROGRAM,
+		});
+		expect(result).toMatchObject({ kind: "incomplete", baselineMissing: true });
+	});
+
+	it("resolver dos veces da lo mismo", async () => {
+		const v = await version({
+			knows: { adjustmentIds: ["A1"], phaseEventIds: [] },
+		});
+		const args = {
+			version: v,
+			adjustments: [sube("A1", 5, "2026-10-01")],
+			phaseEvents: [],
+			baseline: BASELINE,
+			program: PROGRAM,
+		};
+		expect(await resolveVersion(args)).toEqual(await resolveVersion(args));
 	});
 });

@@ -13,11 +13,15 @@
  * is deterministic: no clock, no database, no ambient state.
  */
 
+import { phaseForDate } from "./phase-events";
+import { resolveWholePlan } from "./prescription";
 import { danglingReferences, type SemanticReference } from "./references";
 import type {
 	PhaseEvent,
 	PlanAdjustment,
 	PrescriptionBaseline,
+	PrescriptionEntry,
+	Program,
 	ProgramKnowledgeCut,
 	ProgramVersion,
 } from "./schema";
@@ -309,4 +313,54 @@ export async function checkBaseline(
 		};
 	}
 	return { kind: "ok" };
+}
+
+// ------------------------------------------------------------ the whole thing
+
+/** A version's plan: one list of entries per template. */
+export type VersionPlan = Map<string, PrescriptionEntry[]>;
+
+/**
+ * A version, resolved — or the reason it cannot be.
+ *
+ * The order of the checks is the specification, and each step exists because
+ * reporting it as the next one would send someone looking in the wrong place:
+ *
+ *   1. are the named ids here?      no → incomplete   (wait for the sync)
+ *   2. is the cut closed?           no → invalid      (this will not fix itself)
+ *   3. is the baseline big enough?  no → incomplete
+ *   4. does the fingerprint match?  no → invalid
+ *   5. resolve, bounded on both axes
+ *
+ * Step 3 before step 4 is the one worth naming: missing baseline rows produce a
+ * different fingerprint too, and calling that `baseline-mismatch` would send you
+ * hunting for a corruption when the sync simply had not finished.
+ *
+ * Never returns `resolved` without a demonstrated baseline. That is the whole
+ * job of `baselineFingerprint`: two devices holding different baselines must not
+ * both answer confidently, and differently, about the same version.
+ */
+export async function resolveVersion(
+	input: ResolveVersionInput & { program: Program },
+): Promise<VersionResolution<VersionPlan>> {
+	const checked = checkVersion(input);
+	if (checked.kind !== "ok") return checked;
+
+	const baseline = await checkBaseline(input.version, input.baseline);
+	if (baseline.kind !== "ok") return baseline;
+
+	const { version } = input;
+	const { universe } = checked;
+
+	const plan = resolveWholePlan(
+		input.baseline,
+		universe.adjustments,
+		{ effectiveOn: version.cutAt, knows: version.knows },
+		(date) =>
+			phaseForDate(input.program, universe.phaseEvents, date, {
+				phaseEventIds: version.knows.phaseEventIds,
+			}).id,
+	);
+
+	return { kind: "resolved", plan };
 }
