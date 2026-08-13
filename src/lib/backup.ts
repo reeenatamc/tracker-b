@@ -14,7 +14,7 @@
 import type { Collections } from "@/db/collections";
 import { persisted } from "@/db/durability";
 import { BACKED_UP_COLLECTIONS } from "@/domain/collection-policy";
-import { readPhotoUrl, savePhoto } from "@/lib/photos";
+import { readPhotoUrl, restorePhoto } from "@/lib/photos";
 
 const FORMAT = "operacion-tesis-backup";
 const VERSION = 1;
@@ -114,13 +114,35 @@ export async function importBackup(
 		throw new Error("El respaldo viene de una versión más nueva de la app.");
 	}
 
-	// Photos first: a record pointing at a missing image would render as broken.
+	/*
+	 * Photos first, and under the id the file already carries.
+	 *
+	 * The `photos` map is keyed by `photoId` — the same one the rows point at —
+	 * so a restore has nothing to derive. It used to route these through the
+	 * ingest path, which compresses and mints a new id, so every restore degraded
+	 * the image a little more and rewrote the rows to follow the new name. See
+	 * T-007. Restoring is not a quieter kind of ingesting.
+	 *
+	 * They go first because a row pointing at an image that is not there renders
+	 * as broken, and because failing here is the cheapest place to fail: nothing
+	 * has been written to the collections yet, so a retry starts from the same
+	 * place. The two stores cannot be written in one transaction, so rather than
+	 * pretend the import is atomic, it is ordered so that the half that can fail
+	 * fails first and re-running is safe.
+	 */
 	const photos = parsed.photos ?? {};
-	const remapped = new Map<string, string>();
+	let restored = 0;
 	for (const [photoId, dataUrl] of Object.entries(photos)) {
-		const blob = await (await fetch(dataUrl)).blob();
-		const file = new File([blob], photoId, { type: blob.type || "image/jpeg" });
-		remapped.set(photoId, await savePhoto(file));
+		try {
+			const blob = await (await fetch(dataUrl)).blob();
+			await restorePhoto(photoId, blob);
+			restored++;
+		} catch (error) {
+			throw new Error(
+				`No se pudo restaurar la foto ${photoId}, así que el respaldo no se ha importado. ` +
+					`Vuelve a intentarlo. (${error instanceof Error ? error.message : String(error)})`,
+			);
+		}
 	}
 
 	let sessions = 0;
@@ -135,13 +157,9 @@ export async function importBackup(
 			const id = row.id as string;
 			if (typeof id !== "string") continue;
 
-			const value =
-				key === "inspo" && typeof row.photoId === "string"
-					? { ...row, photoId: remapped.get(row.photoId) ?? row.photoId }
-					: row;
-
-			// Through `raw`: the unwrapped collection, which does not stamp.
-			written.push(upsert(collections.raw[key], id, value));
+			// Through `raw`: the unwrapped collection, which does not stamp. And
+			// verbatim: a row's `photoId` points at a photo that still has that id.
+			written.push(upsert(collections.raw[key], id, row));
 
 			if (key === "sessions") sessions++;
 			if (key === "sets") sets++;
@@ -152,7 +170,7 @@ export async function importBackup(
 	// the one moment where losing it means losing everything.
 	await Promise.all(written.map((transaction) => persisted(transaction)));
 
-	return { sessions, sets, photos: remapped.size, bytes: file.size };
+	return { sessions, sets, photos: restored, bytes: file.size };
 }
 
 /**

@@ -18,7 +18,12 @@ import { persisted } from "@/db/durability";
 import { useRecords } from "@/db/records";
 import type { InspoItem } from "@/domain/schema";
 import { formatDayMonth, todayIso } from "@/lib/format";
-import { deletePhoto, formatBytes, photosSize, savePhoto } from "@/lib/photos";
+import {
+	deletePhoto,
+	formatBytes,
+	ingestPhoto,
+	photosSize,
+} from "@/lib/photos";
 
 export const Route = createFileRoute("/inspo")({ component: Inspo });
 
@@ -282,7 +287,7 @@ function AddItem({
 		setBusy(true);
 		setError(null);
 		try {
-			setPhotoId(await savePhoto(file));
+			setPhotoId(await ingestPhoto(file));
 		} catch (cause) {
 			setError(
 				cause instanceof Error

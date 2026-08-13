@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/photos", () => ({
 	readPhotoUrl: vi.fn(),
-	savePhoto: vi.fn(),
+	restorePhoto: vi.fn(),
 }));
 
 import type { Collections } from "@/db/collections";
@@ -25,7 +25,7 @@ import { phaseForDate } from "@/domain/phase-events";
 import type { PhaseEvent } from "@/domain/schema";
 import { exportBackup, importBackup } from "@/lib/backup";
 import { migratePhaseIds } from "@/lib/migrate-phase-ids";
-import { readPhotoUrl, savePhoto } from "@/lib/photos";
+import { readPhotoUrl, restorePhoto } from "@/lib/photos";
 
 /**
  * Node has no FileReader, and `blobToDataUrl` needs one. Base64 of the blob's
@@ -157,7 +157,7 @@ function asFile(blob: Blob, name = "backup.json"): File {
 
 beforeEach(() => {
 	vi.mocked(readPhotoUrl).mockReset();
-	vi.mocked(savePhoto).mockReset();
+	vi.mocked(restorePhoto).mockReset();
 });
 
 describe("ida y vuelta", () => {
@@ -244,7 +244,6 @@ describe("fotos", () => {
 		vi.mocked(readPhotoUrl).mockResolvedValue(
 			"data:image/jpeg;base64,/9j/4AA=",
 		);
-		vi.mocked(savePhoto).mockResolvedValue("nueva.jpg");
 
 		const source = makeCollections({
 			inspo: [
@@ -263,9 +262,15 @@ describe("fotos", () => {
 		const restored = await importBackup(target, asFile(blob));
 
 		expect(restored.photos).toBe(1);
-		expect(savePhoto).toHaveBeenCalledOnce();
-		// La fila tiene que apuntar al archivo recién escrito, no al viejo id.
-		expect(target.inspo.toArray[0].photoId).toBe("nueva.jpg");
+		expect(restorePhoto).toHaveBeenCalledOnce();
+		/*
+		 * Con su id, el que traía el archivo. Esta prueba exigía lo contrario —que
+		 * la fila apuntara a un archivo recién escrito— y esa expectativa *era* el
+		 * defecto: cada restauración acuñaba un id nuevo y recomprimía la imagen.
+		 * Ver T-007.
+		 */
+		expect(restorePhoto).toHaveBeenCalledWith("vieja.jpg", expect.anything());
+		expect(target.inspo.toArray[0].photoId).toBe("vieja.jpg");
 	});
 
 	it("una foto que ya no está en disco no rompe la exportación", async () => {

@@ -72,44 +72,98 @@ indecidible se deja en paz en vez de adivinarlo.
 
 ---
 
-## T-007 · Restaurar un respaldo vuelve a comprimir las fotos
+## T-007 · Restaurar un respaldo volvía a comprimir las fotos
 
-**Estado: ABIERTO** · **Severidad: media** · encontrado validando el upgrade E3→E4 sobre
-una copia del respaldo real
+**Estado: RESUELTO** · rama `fix-t007-photo-restore` · **Severidad era: media** ·
+encontrado validando el upgrade E3→E4 sobre una copia del respaldo real
 
-`importBackup` recorre las fotos del archivo y llama a `savePhoto`, que empieza por
-`compress(file)`. Comprimir es lo correcto **al entrar una foto nueva** desde la cámara o
-el carrete; al restaurar no entra nada nuevo, sino que vuelve una foto que ya se guardó, y
-volver a comprimirla la degrada otra vez.
+### Causa raíz
 
-Medido sobre la misma imagen a lo largo de una cadena de restauraciones:
+`importBackup` llamaba a `savePhoto`, la misma función que la pantalla de inspo, y esa
+función empieza por `compress(file)` y acuña un `photoId` nuevo con `crypto.randomUUID()`.
+
+Las dos cosas son correctas **al entrar** una foto: una foto de móvil son 3–5 MB, guardarlas
+enteras llena el dispositivo, y una foto que llega por primera vez no tiene id del que
+partir. Ninguna de las dos lo es al restaurar: los bytes ya son un hecho guardado y el id ya
+existe —es la clave del mapa `photos` del archivo—, así que no había nada que derivar y sí
+algo que perder.
+
+Es T-004 otra vez, aplicado a los blobs en vez de a las filas: **RESTORE ≠ CREATE**.
+
+### Reproducción, antes
+
+Cadena respaldo → restaurar → exportar sobre la misma imagen:
 
 ```
-respaldo original      277 053 bytes   sha 06c7e3bf…
-restaurado una vez     192 786         sha 69a22ad1…
-restaurado dos veces   192 794         sha 95dcbf85…
-restaurado tres veces  192 761         sha e26acf8e…
+respaldo original      277 053 bytes   sha 06c7e3bf…   id dae30a76…
+restaurado una vez     192 786         sha 69a22ad1…   id 596292b4…
+restaurado dos veces   192 794         sha 95dcbf85…   id 413d5698…
+restaurado tres veces  192 761         sha e26acf8e…   id e88b6d00…
 ```
 
-La primera pasada se lleva un 30 %. Las siguientes ya casi no cambian el tamaño pero sí
-los bytes, así que la pérdida es generacional: cada ciclo respaldo→restauración vuelve a
-codificar. Comprobado en un origen E3 puro y en uno E4: mismo resultado, así que es
-anterior a E4 y E4 no lo toca.
+La primera pasada se llevaba un 30 %, y cada ciclo posterior volvía a codificar: pérdida
+generacional. El id cambiaba en cada vuelta y la fila de `inspo` se reapuntaba detrás, así
+que el id anterior quedaba sin referenciar. Dos dispositivos que restauraran el mismo
+respaldo acababan con ids distintos para la misma foto, y como los blobs no viajan por el
+sync, tras sincronizar uno de los dos apuntaba a una foto que no tenía.
 
-Efecto lateral: `savePhoto` acuña un `photoId` nuevo y la fila de `inspo` se reapunta. Dos
-dispositivos que restauren el mismo respaldo acaban con ids distintos para la misma foto,
-y como las fotos son archivos de OPFS y no viajan por el sync, tras sincronizar uno de los
-dos apunta a una foto que no tiene.
+### El arreglo
 
-**El contrato que falta:** restaurar no es dar de alta una foto nueva. Una foto que ya
-estaba almacenada debe conservar sus bytes y su id; `savePhoto`/`compress` pertenecen al
-ingreso, no a la restauración. Es la misma distinción que T-004 hizo para las filas —
-RESTORE ≠ CREATE— aplicada a los archivos.
+Dos caminos con nombres distintos en `lib/photos.ts`, no un booleano:
 
-No bloquea la reproducibilidad de `ProgramVersion`: la base de prescripción no incluye
-fotos y las huellas no dependen de ellas. Sí impide llamar al respaldo *lossless*.
+| | comprime | acuña id | escribe |
+|---|---|---|---|
+| `ingestPhoto(file)` | sí | sí | sí |
+| `restorePhoto(photoId, blob)` | **no** | **no** | sí |
 
----
+`restorePhoto` recibe el id porque el respaldo lo trae. El respaldo ya no reapunta la fila:
+un `photoId` sigue señalando a la foto que tiene ese id. Los metadatos de la fila no se
+tocan —eso lo resolvió T-004— y las fotos en OPFS no llevan metadatos aparte de sus bytes.
+
+**Identidad.** El `photoId` se acuña **una sola vez**, al ingresar, y de ahí en adelante
+viaja con el dato. No se deriva de los bytes, así que recomprimir no puede moverlo. El
+formato de respaldo siempre ha llevado el id como clave del mapa `photos` —desde la
+versión 1—, así que no hay caso antiguo sin id y no hace falta fallback ni migración.
+
+**Durabilidad.** `restorePhoto` no vuelve hasta que `writable.close()` ha vaciado a disco, y
+las fotos se escriben **antes** que las filas. Los dos almacenes no caben en una
+transacción, así que en vez de fingir atomicidad el import se ordena para que la mitad que
+puede fallar falle primero: si una foto no se puede escribir, se lanza nombrándola y no se
+ha tocado ninguna colección. Volver a intentarlo es seguro porque escribir por id es
+idempotente.
+
+### Regresiones
+
+`src/lib/photo-restore.test.ts`, con bytes sintéticos. Ocho de las once fallan con el código
+anterior, incluida la directa: **export → restore → export cinco veces y la huella no se
+mueve**. Cubren además restaurar dos veces el mismo archivo, cero referencias rotas, cero
+blobs duplicados, una referencia que el respaldo no trae —que ya existía en el registro
+real, de una entrada borrada— y que un fallo de blob impide declarar el import correcto.
+
+Dos guardas estructurales sostienen la separación: el respaldo no puede mencionar
+`ingestPhoto`, y la pantalla de inspo no puede mencionar `restorePhoto`. Dar de alta una
+foto desde la interfaz sigue comprimiendo exactamente igual que antes.
+
+La prueba de `backup.test.ts` que exigía lo contrario —que la fila apuntara a un archivo
+recién escrito— se corrigió: esa expectativa *era* el defecto.
+
+### Validación, después
+
+Copia del respaldo real en un origen desechable nuevo, tres ciclos:
+
+```
+                       photoId     bytes    sha256
+respaldo original      dae30a76…   277 053  06c7e3bf8056…
+restore #1 → export    dae30a76…   277 053  06c7e3bf8056…
+restore #2 → export    dae30a76…   277 053  06c7e3bf8056…
+restore #3 → export    dae30a76…   277 053  06c7e3bf8056…
+```
+
+`hash1 == hash2 == hash3`, mismo id, mismas referencias. En OPFS: 1 blob, 0 duplicados,
+0 referencias rotas desde filas vivas. La referencia huérfana `2563852e…` pertenece a una
+fila borrada y venía así del respaldo original.
+
+El respaldo original queda intacto y fuera del repositorio.
 
 ## T-006 · «No hay endpoint» se decide leyendo el texto del error
 
