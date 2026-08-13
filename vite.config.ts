@@ -35,6 +35,10 @@ export default defineConfig({
 		// and open it with no network at all.
 		tanstackStart({
 			spa: { enabled: true },
+			// A test that sits next to the screen it tests is not a route, and the
+			// generator warning that says so four times per build is noise that
+			// trains you to ignore build output.
+			router: { routeFileIgnorePattern: "\\.test\\.tsx?$" },
 		}),
 		viteReact(),
 		serviceWorker(resolvePath("./public")),
