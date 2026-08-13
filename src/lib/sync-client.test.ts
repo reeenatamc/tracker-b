@@ -437,3 +437,154 @@ describe("un cliente por detrás del servidor", () => {
 		expect(status).toContain("actualízalo para sincronizar");
 	});
 });
+
+// ------------------------------------ T-006 · el cuerpo no decide la semántica
+
+/**
+ * Lo mismo que prueba `domain/sync.test.ts`, pero atravesando el cliente entero
+ * con respuestas de verdad — porque el defecto no estaba en la decisión sino en
+ * que la decisión nunca llegaba a ver el status: la respuesta se convertía en
+ * `Error(texto)` antes, y el texto de un 404 con cuerpo JSON no menciona 404.
+ */
+describe("qué estado deja cada respuesta", () => {
+	const ultimo = async (response: Response | Error) => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockImplementation(() =>
+					response instanceof Error
+						? Promise.reject(response)
+						: Promise.resolve(response.clone()),
+				),
+		);
+		const states: SyncState[] = [];
+		createSyncClient(makeCollections(), (s) => states.push(s));
+		await settle();
+		return states[states.length - 1];
+	};
+
+	it("404 con JSON → solo en este dispositivo", async () => {
+		const state = await ultimo(
+			new Response(JSON.stringify({ error: "no encontrado" }), {
+				status: 404,
+			}),
+		);
+		expect(state.status).toBe("unconfigured");
+	});
+
+	it("404 con texto → solo en este dispositivo", async () => {
+		const state = await ultimo(new Response("404 Not Found", { status: 404 }));
+		expect(state.status).toBe("unconfigured");
+	});
+
+	it("404 con el cuerpo vacío → solo en este dispositivo", async () => {
+		const state = await ultimo(new Response(null, { status: 404 }));
+		expect(state.status).toBe("unconfigured");
+	});
+
+	it("404 con HTML de una pantalla de login → solo en este dispositivo", async () => {
+		const state = await ultimo(
+			new Response("<!doctype html><title>404</title>", { status: 404 }),
+		);
+		expect(state.status).toBe("unconfigured");
+	});
+
+	it("500 → error de sincronización", async () => {
+		const state = await ultimo(new Response("{}", { status: 500 }));
+		expect(state.status).toBe("error");
+	});
+
+	/** La inversa que importa: el texto ya no puede reclasificar nada. */
+	it("500 cuyo cuerpo habla de un 404 sigue siendo un error", async () => {
+		const state = await ultimo(
+			new Response(JSON.stringify({ error: "el proxy devolvió 404" }), {
+				status: 500,
+			}),
+		);
+		expect(state.status).toBe("error");
+	});
+
+	it("y un Error suelto que mencione 404, sin respuesta, tampoco", async () => {
+		const state = await ultimo(new Error("algo 404 algo"));
+		expect(state.status).toBe("error");
+	});
+
+	it("un servidor caído es un error, no «esta app no tiene sync»", async () => {
+		const state = await ultimo(new TypeError("Failed to fetch"));
+		expect(state.status).toBe("error");
+	});
+
+	it("sin conexión, es estar sin conexión", async () => {
+		vi.stubGlobal("navigator", { onLine: false });
+		const states: SyncState[] = [];
+		createSyncClient(makeCollections(), (s) => states.push(s));
+		await settle();
+		expect(states[states.length - 1].status).toBe("offline");
+	});
+
+	it("409 sigue siendo «actualiza este dispositivo», con su versión", async () => {
+		const state = await ultimo(
+			new Response(JSON.stringify({ error: "client-outdated", required: 7 }), {
+				status: 409,
+			}),
+		);
+		expect(state).toMatchObject({ status: "outdated", required: 7 });
+	});
+
+	/** Un 409 sin el cuerpo esperado sigue siendo la compuerta, no un fallo de red. */
+	it("y un 409 con otro cuerpo también", async () => {
+		const state = await ultimo(new Response("{}", { status: 409 }));
+		expect(state.status).toBe("outdated");
+	});
+});
+
+// --------------------------------------------------------- la guarda estructural
+
+describe("el status no se deduce de un texto", () => {
+	const produccion = [
+		[
+			"sync-client.ts",
+			readFileSync(join(import.meta.dirname, "sync-client.ts"), "utf8"),
+		],
+		[
+			"domain/sync.ts",
+			readFileSync(
+				join(import.meta.dirname, "..", "domain", "sync.ts"),
+				"utf8",
+			),
+		],
+		[
+			"SyncStatus.tsx",
+			readFileSync(
+				join(import.meta.dirname, "..", "components", "SyncStatus.tsx"),
+				"utf8",
+			),
+		],
+	] as const;
+
+	/** Sin comentarios: explicar el defecto es justo lo que hay que conservar. */
+	const codigo = (fuente: string) =>
+		fuente.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
+	it("nadie busca un número de status dentro de un mensaje", () => {
+		for (const [nombre, fuente] of produccion) {
+			const limpio = codigo(fuente);
+			for (const patron of [
+				/\.includes\(\s*["'`][^"'`]*\d{3}/,
+				/message\s*\.\s*match/,
+				/\.match\(\s*\/[^/]*\d{3}/,
+				/message\s*\.\s*indexOf/,
+				/message\.includes\(/,
+			]) {
+				expect(patron.test(limpio), `${nombre} · ${patron}`).toBe(false);
+			}
+		}
+	});
+
+	it("y la clasificación vive en un solo sitio, que recibe el status", () => {
+		const cliente = codigo(produccion[0][1]);
+		expect(cliente).toContain("classifyFailure({");
+		expect(cliente).toContain("error instanceof SyncHttpError");
+	});
+});

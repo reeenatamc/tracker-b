@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	changedSince,
 	checkSchemaVersion,
+	classifyFailure,
 	clientVersionOf,
 	highWaterMark,
 	mergeRecords,
@@ -358,5 +359,76 @@ describe("el salto de esquema 3 → 4", () => {
 		const vuelta = takeTurn(3, serverVersion);
 		expect(vuelta).toMatchObject({ admitted: false, required: 4 });
 		expect(vuelta.serverVersion).toBe(4);
+	});
+});
+
+// ------------------------------------------------- T-006 · quién decide el qué
+
+/**
+ * El status decide la semántica; el cuerpo sólo la explica.
+ *
+ * Antes era al revés: la respuesta se convertía en `Error(texto)` en cuanto
+ * fallaba, y más tarde se clasificaba buscando `"404"` **dentro del mensaje**.
+ * Funcionaba de casualidad —porque el servidor de desarrollo contesta 404 con
+ * HTML y el mensaje acababa diciendo «El servidor respondió 404»— y se rompía en
+ * cuanto el cuerpo traía JSON, que es lo que hace un servidor de verdad.
+ *
+ * Las dos pruebas inversas son las que importan: demuestran que el texto ya no
+ * puede cambiar la clasificación, en ninguna de las dos direcciones.
+ */
+describe("clasificar un intercambio fallido", () => {
+	const conStatus = (status: number) =>
+		classifyFailure({ status, online: true }).kind;
+
+	it("404 es que aquí no hay endpoint, y eso no es un fallo", () => {
+		expect(conStatus(404)).toBe("unconfigured");
+	});
+
+	it("409 es la compuerta de esquema", () => {
+		expect(conStatus(409)).toBe("outdated");
+	});
+
+	it("un servidor roto es un error, nunca «solo en este dispositivo»", () => {
+		for (const status of [500, 502, 503, 504]) {
+			expect(conStatus(status), String(status)).toBe("error");
+		}
+	});
+
+	it("y lo mismo para lo inesperado", () => {
+		for (const status of [400, 401, 403, 418, 429]) {
+			expect(conStatus(status), String(status)).toBe("error");
+		}
+	});
+
+	/** Sin respuesta no hubo 404: no contestó nadie. */
+	it("un fetch rechazado estando conectada es un error", () => {
+		expect(classifyFailure({ status: null, online: true }).kind).toBe("error");
+	});
+
+	it("y sin conexión es estar sin conexión", () => {
+		expect(classifyFailure({ status: null, online: false }).kind).toBe(
+			"offline",
+		);
+	});
+
+	/**
+	 * La prueba inversa, en sus dos direcciones. El mensaje ya no entra en la
+	 * decisión, así que ni un 500 que hable de 404 ni un 404 mudo pueden mentir.
+	 */
+	it("un 500 no se vuelve local por mencionar un 404", () => {
+		expect(conStatus(500)).toBe("error");
+	});
+
+	it("y un 404 lo es aunque su cuerpo no diga nada", () => {
+		expect(conStatus(404)).toBe("unconfigured");
+	});
+
+	it("estar conectada no cambia lo que dijo el servidor", () => {
+		for (const status of [404, 409, 500]) {
+			expect(
+				classifyFailure({ status, online: false }).kind,
+				String(status),
+			).toBe(classifyFailure({ status, online: true }).kind);
+		}
 	});
 });

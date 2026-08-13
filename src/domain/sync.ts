@@ -134,6 +134,54 @@ export function checkSchemaVersion(
 	return { ok: true };
 }
 
+// ------------------------------------------------------- classifying a failure
+
+/**
+ * What went wrong with an exchange, decided by the HTTP status alone.
+ *
+ * `unconfigured` and `error` are opposite advice — one says everything is fine
+ * and works locally, the other says something is broken and worth retrying — so
+ * telling them apart correctly is the whole point of this function.
+ */
+export type SyncFailure =
+	/** No endpoint here at all. The app works; there is just nowhere to sync to. */
+	| { kind: "unconfigured" }
+	/** The server holds data this client cannot read. */
+	| { kind: "outdated" }
+	/** Reached the server and it said no, or said something unexpected. */
+	| { kind: "error" }
+	/** Never reached anything, and the device knows it is not connected. */
+	| { kind: "offline" };
+
+/**
+ * The status decides; the body only ever explains.
+ *
+ * This used to be the other way round: the response was turned into an
+ * `Error(string)` at the point of failure and classified later by looking for
+ * `"404"` **inside the message**. Which meant a 500 whose body happened to
+ * mention 404 read as "there is no sync here", and a real 404 whose body was
+ * JSON read as a sync failure — because the JSON branch replaced the message
+ * with the body's `error` field, and that text has no status in it. It worked in
+ * practice only because the dev server answered 404 with HTML.
+ *
+ * `status: null` means `fetch` rejected without ever producing a response: DNS,
+ * connection refused, a server that is not running. That is not a 404 — nothing
+ * answered at all — and calling it one would tell someone their app has no sync
+ * because their wifi dropped.
+ */
+export function classifyFailure(input: {
+	/** The HTTP status, or null when there was no response at all. */
+	status: number | null;
+	online: boolean;
+}): SyncFailure {
+	if (input.status === null) {
+		return input.online ? { kind: "error" } : { kind: "offline" };
+	}
+	if (input.status === 404) return { kind: "unconfigured" };
+	if (input.status === 409) return { kind: "outdated" };
+	return { kind: "error" };
+}
+
 /**
  * A client that sends no version at all is a client from before versions existed.
  */

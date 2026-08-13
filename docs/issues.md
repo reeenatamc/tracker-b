@@ -165,32 +165,86 @@ fila borrada y venía así del respaldo original.
 
 El respaldo original queda intacto y fuera del repositorio.
 
-## T-006 · «No hay endpoint» se decide leyendo el texto del error
+## T-006 · «No hay endpoint» se decidía leyendo el texto del error
 
-**Estado: ABIERTO** · **Severidad: baja** · encontrado montando los orígenes aislados de
-validación de E4
+**Estado: RESUELTO** · rama `fix-t006-sync-status` · **Severidad era: baja** · encontrado
+montando los orígenes aislados de validación de E4
 
-`sync-client.ts` distingue «aquí no hay sync configurado» de «el sync falló» buscando
-`"404"` **dentro del mensaje de error**:
+### Causa raíz
+
+La respuesta se convertía en `Error(texto)` en cuanto fallaba, y la clasificación ocurría
+después, sobre el mensaje:
 
 ```ts
-if (message.includes("DATABASE_URL") || message.includes("404")) {
-	onState({ status: "unconfigured" });
-}
+if (message.includes("DATABASE_URL") || message.includes("404")) → unconfigured
 ```
 
-Y ese mensaje sólo contiene `"404"` cuando la respuesta no traía JSON, porque unas líneas
-antes se prefiere el campo `error` del cuerpo si existe. Un servidor sin la ruta que
-responda `404 {"error": "..."}` acaba mostrándose como fallo de sincronización en vez de
-«Solo en este dispositivo».
+Para entonces `response.status` ya no existía. Y el mensaje sólo contenía `"404"` cuando la
+respuesta **no** traía JSON, porque unas líneas antes se prefería el campo `error` del
+cuerpo. Es decir: funcionaba únicamente porque el servidor de desarrollo contesta 404 con
+HTML. Con un cuerpo JSON —lo que hace un servidor de verdad— el mismo 404 se mostraba como
+fallo de sincronización.
 
-Funciona hoy por cómo responde el servidor de desarrollo, no por diseño: el código de
-estado ya está en la mano en ese punto y es la respuesta correcta a la pregunta.
+Y al revés también: un 500 cuyo cuerpo mencionara un 404, o un `TypeError` de red con «404»
+en el texto, se leían como «esta app no tiene sync».
 
-**Arreglo:** decidir por `response.status === 404`, no por el texto. Commit pequeño y
-aparte; no bloquea nada mientras haya un endpoint válido.
+### El contrato
 
----
+**El status decide la semántica; el cuerpo sólo la explica.** Nunca al revés.
+
+| respuesta | estado | qué significa |
+|---|---|---|
+| 404, con el cuerpo que sea | `unconfigured` | aquí no hay endpoint · «Solo en este dispositivo» |
+| 409 | `outdated` | la compuerta de esquema de E4 |
+| 4xx/5xx restantes | `error` | se llegó al servidor y dijo que no |
+| `fetch` rechazado, con conexión | `error` | no contestó nadie; **no** es un 404 |
+| `fetch` rechazado, sin conexión | `offline` | sin red |
+
+### El arreglo
+
+`classifyFailure({ status, online })` en `domain/sync.ts`, pura y al lado de la otra
+decisión de protocolo. `status: null` significa que `fetch` rechazó sin llegar a producir
+una respuesta: DNS, conexión rechazada, servidor apagado. Eso no es un 404 —no contestó
+nadie— y llamarlo así le diría a alguien que su app no tiene sync porque se le cayó el wifi.
+
+Para que la decisión llegue a ver el status, el fallo HTTP viaja tipado: `SyncHttpError`
+conserva `status`, el mensaje y —sólo para el 409— el `required` del cuerpo. Nadie vuelve a
+reconstruir por texto algo que `fetch` ya sabía.
+
+Una guarda estructural prohíbe el patrón en producción: buscar tres dígitos dentro de un
+mensaje, `message.includes(`, `message.match`, `message.indexOf`. En documentación y
+pruebas el texto «404» es libre; lo prohibido es deducir el status de una cadena.
+
+### Cambio de comportamiento, a propósito
+
+Antes, un 500 cuyo cuerpo dijera `DATABASE_URL no está configurada.` se mostraba como «Solo
+en este dispositivo». Ahora es un error de sincronización, que es lo que es: el endpoint
+existe y está desplegado, y lo que falla es su configuración. Decir «esta app no tiene
+sync» lo escondía.
+
+### Regresiones
+
+`domain/sync.test.ts` cubre la decisión pura; `lib/sync-client.test.ts` la atraviesa entera
+con respuestas reales: 404 con JSON, con texto, con el cuerpo vacío y con HTML de login; 500;
+409 con y sin el cuerpo esperado; `fetch` rechazado; sin conexión. Y las dos inversas, que
+son las que demuestran que el texto ya no clasifica: **un 500 cuyo cuerpo habla de un 404
+sigue siendo un error**, y **un `Error("algo 404 algo")` sin respuesta HTTP tampoco es
+local-only**. Seis fallan con el código anterior.
+
+Un detalle que apareció al escribirlas: la rama temprana del 409 consumía el cuerpo con
+`response.json()`, así que al caer a `httpFailure` el `clone()` fallaba y el status se
+perdía. Ahora clona.
+
+### Smoke
+
+Cuatro orígenes desechables:
+
+```
+endpoint presente y servidor bien   → «Sincronizado hace un momento»
+endpoint inexistente (404)          → «Solo en este dispositivo»
+endpoint presente, servidor roto    → error en rojo, NO local-only
+cliente esquema 3, servidor en 4    → «Actualiza este dispositivo…» (409)
+```
 
 ## T-005 · Cuatro colecciones no han sincronizado nunca
 

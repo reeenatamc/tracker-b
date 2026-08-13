@@ -21,7 +21,11 @@ import {
 	SYNCED_COLLECTIONS,
 	type SyncedCollection,
 } from "@/domain/collection-policy";
-import { highWaterMark, SYNC_SCHEMA_VERSION } from "@/domain/sync";
+import {
+	classifyFailure,
+	highWaterMark,
+	SYNC_SCHEMA_VERSION,
+} from "@/domain/sync";
 import { program } from "@/lib/content";
 import { normalizeIncoming } from "@/lib/migrate-phase-ids";
 
@@ -77,6 +81,51 @@ type Row = Record<string, unknown> & {
  * comment wanted: these rows carry no opinion, they just have to arrive.
  */
 export const LEGACY_STAMP = 1;
+
+/**
+ * A failed exchange that still knows what the server answered.
+ *
+ * The status has to survive all the way to whoever classifies the failure.
+ * Turning the response into a plain `Error(text)` here — which is what used to
+ * happen — throws away the one fact that decides the meaning, and leaves the
+ * classifier reading the message for a number that `fetch` already knew. See
+ * T-006 in `docs/issues.md`.
+ */
+export class SyncHttpError extends Error {
+	constructor(
+		readonly status: number,
+		message: string,
+		/** From the body, and only ever read after the status said 409. */
+		readonly required?: number,
+	) {
+		super(message);
+		this.name = "SyncHttpError";
+	}
+}
+
+/**
+ * The message is for the person reading it; it never decides anything.
+ *
+ * A body may be JSON with an `error`, plain text, empty, or the HTML of a login
+ * page — all four are the same status, and the status is what gets classified.
+ */
+async function httpFailure(response: Response): Promise<SyncHttpError> {
+	const body = await response
+		.clone()
+		.json()
+		.then((parsed: { error?: string; required?: number }) => parsed)
+		.catch(() => ({}) as { error?: string; required?: number });
+	const reason = body.error;
+
+	// Behind Deployment Protection an expired session answers with the login page
+	// instead of JSON; saying so beats "unexpected token <".
+	const detail =
+		response.status === 401 || response.status === 403
+			? "Tu sesión de Vercel caducó. Abre la app de nuevo para reconectar."
+			: (reason ?? `El servidor respondió ${response.status}.`);
+
+	return new SyncHttpError(response.status, detail, body.required);
+}
 
 /** A row is owed its first push while it carries no timestamp of its own. */
 function awaitingFirstPush(row: Row): boolean {
@@ -183,7 +232,13 @@ export function createSyncClient(
 			// this version cannot read. Losing sync for a day is an inconvenience;
 			// a log full of values a version does not understand is damage.
 			if (response.status === 409) {
-				const body = (await response.json().catch(() => ({}))) as {
+				// Clonada: si el cuerpo no es el esperado, la respuesta sigue entera
+				// para que `httpFailure` conserve el status. Consumirla aquí dejaba
+				// caer la clasificación al camino de «no contestó nadie».
+				const body = (await response
+					.clone()
+					.json()
+					.catch(() => ({}))) as {
 					error?: string;
 					required?: number;
 				};
@@ -200,21 +255,7 @@ export function createSyncClient(
 				}
 			}
 
-			if (!response.ok) {
-				const reason = await response
-					.clone()
-					.json()
-					.then((body: { error?: string }) => body.error)
-					.catch(() => undefined);
-				if (reason) throw new Error(reason);
-				// Behind Deployment Protection an expired session answers with the
-				// login page instead of JSON; saying so beats "unexpected token <".
-				const detail =
-					response.status === 401 || response.status === 403
-						? "Tu sesión de Vercel caducó. Abre la app de nuevo para reconectar."
-						: `El servidor respondió ${response.status}.`;
-				throw new Error(detail);
-			}
+			if (!response.ok) throw await httpFailure(response);
 
 			let body = (await response.json()) as {
 				changes?: Change[];
@@ -255,12 +296,8 @@ export function createSyncClient(
 				changes = collected.changes;
 				firstPush = collected.firstPush;
 				response = await exchange(from, changes);
-				if (!response.ok) {
-					// El cursor viejo sigue guardado: se reintenta entero, no a medias.
-					throw new Error(
-						`El servidor respondió ${response.status} al rehacer la sincronización.`,
-					);
-				}
+				// El cursor viejo sigue guardado: se reintenta entero, no a medias.
+				if (!response.ok) throw await httpFailure(response);
 				body = (await response.json()) as {
 					changes?: Change[];
 					highWaterMark?: number;
@@ -331,19 +368,36 @@ export function createSyncClient(
 			onPulled(incoming.length);
 			onState({ status: "idle", lastSyncedAt });
 		} catch (error) {
+			/*
+			 * Del servidor cuando hubo servidor; una frase nuestra cuando no. Un
+			 * «Failed to fetch» en la barra es el navegador hablándole a quien lo
+			 * programó, no a quien está en el gimnasio.
+			 */
 			const message =
-				error instanceof Error ? error.message : "No se pudo sincronizar.";
-			// A 404 means there is no endpoint here at all — the dev server, or a
-			// build deployed before sync existed. Neither is a failure to report.
-			if (message.includes("DATABASE_URL") || message.includes("404")) {
-				onState({ status: "unconfigured" });
-			} else {
-				onState(
-					navigator.onLine
-						? { status: "error", message, lastSyncedAt }
-						: { status: "offline", lastSyncedAt },
-				);
-			}
+				error instanceof SyncHttpError
+					? error.message
+					: "No se pudo conectar. Lo tuyo se guarda aquí y se sincroniza luego.";
+			/*
+			 * Classified by what the server answered, never by what the message
+			 * says. A 404 is "there is no endpoint here" whatever its body; a 500
+			 * is a broken server even if its body mentions 404; and a rejected
+			 * fetch answered nothing at all, which is not a 404 either.
+			 */
+			const failure = classifyFailure({
+				status: error instanceof SyncHttpError ? error.status : null,
+				online: navigator.onLine,
+			});
+
+			if (failure.kind === "unconfigured") onState({ status: "unconfigured" });
+			else if (failure.kind === "offline")
+				onState({ status: "offline", lastSyncedAt });
+			else if (failure.kind === "outdated")
+				onState({
+					status: "outdated",
+					required: error instanceof SyncHttpError ? (error.required ?? 0) : 0,
+					lastSyncedAt,
+				});
+			else onState({ status: "error", message, lastSyncedAt });
 		} finally {
 			running = false;
 			if (queued) {
