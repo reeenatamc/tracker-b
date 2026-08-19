@@ -1,119 +1,83 @@
 # tracker-b
 
-Un tracker de entrenamiento que funciona sin internet, porque se usa de pie, con una mano,
-entre series.
+*[Léeme en español](README.es.md)*
 
-Nació de un Excel de 8 hojas: un programa de 19 semanas con fuerza full-body, rehabilitación
-de tobillo, cardio y nutrición. El Excel era un buen plan y un mal registrador — 15 columnas
-no se llenan en el gimnasio. Esto separa las dos cosas: el plan es contenido, el registro es
-una base de datos, y todo lo demás se calcula.
+A training tracker that works with no internet, because it gets used standing
+up, one-handed, between sets.
 
-## Lo que hace que valga la pena
+## Why it exists
 
-Las reglas de progresión del programa son deterministas:
+It started as an eight-sheet spreadsheet: a nineteen-week programme covering
+full-body strength, ankle rehab, cardio and nutrition. The spreadsheet was a
+good plan and a bad logger — nobody fills in fifteen columns at the gym. This
+splits the two: the plan is content, the log is a database, and everything else
+is derived.
 
-> Mantén el peso hasta completar el tope de reps en todas las series con técnica limpia y RIR
-> cercano al objetivo de la fase; luego sube el incremento mínimo.
+## What makes it worth the trouble
 
-Eso es una función pura. La columna «próximo objetivo» que antes se llenaba a mano ahora se
-calcula, y al abrir un ejercicio la carga y las reps llegan precargadas con lo que dice el
-programa y lo que hiciste la vez pasada.
+The progression rules are deterministic:
 
-Una regla manda sobre todas: si hay dolor relevante (≥ 3/10), hinchazón o un episodio de
-inestabilidad, la app **no sugiere subir carga**. La lógica no empuja peso sobre una señal de
-alarma.
+> Hold the weight until you complete the top of the rep range on every set with
+> clean technique and RIR near the phase target; then add the smallest
+> increment.
+
+That is a pure function. The "next target" column that used to be filled in by
+hand is now computed, and opening an exercise pre-fills the load and reps from
+what the programme says and what you did last time.
+
+One rule overrides all the others: if there is meaningful pain (≥ 3/10),
+swelling, or an instability episode, the app **will not suggest going heavier**.
+The logic does not push weight on top of a warning sign.
 
 ## Stack
 
-| Pieza | Para qué |
+| Piece | For |
 |---|---|
-| TanStack Start (SPA) | Routing por archivos. Sin SSR: no hay nada que un servidor pueda renderizar |
-| TanStack DB + wa-sqlite | SQLite real en el navegador sobre OPFS. Las escrituras no tocan la red |
-| Zod | Valida el contenido al arrancar; los tipos se infieren de ahí |
-| Tailwind 4 · Biome · Vitest | Estilos, formato y lint, pruebas |
+| TanStack Start (SPA) | File-based routing. No SSR — there is nothing a server could render |
+| TanStack DB + wa-sqlite | Real SQLite in the browser over OPFS; writes never touch the network |
+| Zod | Validates content at boot; the types are inferred from it |
+| Tailwind 4 · Biome · Vitest | Styles, formatting and lint, tests |
 
-El service worker es propio (`plugins/service-worker.ts`): precachea el build entero y sirve
-cache-first. `vite-plugin-pwa` no llega a emitir un worker bajo el build de dos entornos de
-TanStack Start.
+The service worker is hand-written (`plugins/service-worker.ts`): it precaches
+the whole build and serves cache-first. `vite-plugin-pwa` never emits a worker
+under TanStack Start's two-environment build.
 
-## Privacidad
+## Privacy
 
-Este repo es público y guarda **solo código**.
+This repository is public and holds **code only**.
 
 ```
-content/           🔒 gitignored — tu programa, tu menú, tu planificación
-data/              🔒 gitignored
-*.xlsx             🔒 gitignored
-content.example/   ✅ público — muestra genérica para que el repo corra
+content/           gitignored — your programme, your menu, your planning
+data/              gitignored
+*.xlsx             gitignored
+content.example/   public — a generic sample so the repo runs
 ```
 
-Tus registros viven en el navegador del dispositivo, en OPFS. No hay servidor que los vea.
+Your logs live in the browser on your device, in OPFS. No server ever sees them.
+The `@content` alias points at `content/` when it exists and `content.example/`
+when it does not, so a clean clone builds and runs without any of your data.
 
-El alias `@content` apunta a `content/` cuando existe y a `content.example/` cuando no, así
-que un clon limpio compila y arranca sin tener nada tuyo.
+## Structure
 
-## Empezar
+```
+src/domain/         pure logic, no React, covered by tests
+  progression.ts      double progression -> next target
+  phases.ts           date -> phase -> sets and RIR
+  schedule.ts         day -> session
+  safety.ts           warning signs block progression
+  history.ts          what you did last time
+src/db/             TanStack DB collections and persistence
+src/routes/         / · /ankle · /history
+```
+
+## Getting started
 
 ```bash
 npm install
-npm run import:excel   # xlsx -> content/*.yaml  (necesita tu propio archivo)
 npm run dev            # http://localhost:4310
 ```
 
-Sin `content/` arranca igual, con el programa de ejemplo.
+It starts fine without `content/`, using the example programme.
 
-## Comandos
-
-| | |
-|---|---|
-| `npm run dev` | Servidor de desarrollo, expuesto también en la red local |
-| `npm test` | Pruebas del dominio |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run check` | Biome: formato y lint |
-| `npm run build` | Build de producción a `dist/client` |
-| `npm run deploy` | Construye y publica en Vercel (ver `deploy/README.md`) |
-| `npm run import:excel` | Regenera `content/` desde el Excel |
-| `npm run icons` | Regenera los iconos del PWA |
-
-## Estructura
-
-```
-content/            🔒 el plan: programa, protocolo de tobillo, fuentes
-content.example/    ✅ la misma forma, contenido genérico
-plugins/            service worker
-scripts/            importador del Excel, generador de iconos
-src/
-  domain/           ← lógica pura, sin React, cubierta por pruebas
-    progression.ts    doble progresión -> siguiente objetivo
-    phases.ts         fecha -> fase -> series y RIR
-    schedule.ts       día -> sesión
-    safety.ts         señales de alarma bloquean la progresión
-    history.ts        qué hiciste la vez pasada
-  db/               colecciones de TanStack DB y su persistencia
-  components/       controles del registro
-  routes/           / · /ankle · /history
-```
-
-`domain/` no importa React ni toca I/O. Ahí vive lo único que puede estar mal, y por eso es lo
-único con pruebas.
-
-## Estado
-
-En uso. El offline está verificado: con el servidor apagado la app abre, lee su base de datos
-y muestra el historial.
-
-Desplegado en Vercel con Deployment Protection, porque el bundle lleva dentro el programa de
-`content/`, que es personal. La URL pide iniciar sesión antes de servir nada. El build se hace
-en local (`npm run deploy`) para que el YAML nunca llegue a Vercel — solo el compilado.
-
-Pendiente:
-
-- Sync entre celular y laptop con ElectricSQL sobre Postgres. Se cambia
-  `persistedCollectionOptions` por `electricCollectionOptions` en `src/db/collections.ts`;
-  los componentes no se tocan.
-- Nutrición, progreso semanal y gráficas de tendencia.
-- Export de vuelta a xlsx.
-
-## Nota
-
-Este tracker sigue progreso; no reemplaza un diagnóstico clínico.
+## Licence
+MIT
