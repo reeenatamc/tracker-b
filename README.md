@@ -9,7 +9,7 @@ up, one-handed, between sets.
 
 It started as an eight-sheet spreadsheet: a nineteen-week programme covering
 full-body strength, ankle rehab, cardio and nutrition. The spreadsheet was a
-good plan and a bad logger — nobody fills in fifteen columns at the gym. This
+good plan and a bad logger. Nobody fills in fifteen columns at the gym. This
 splits the two: the plan is content, the log is a database, and everything else
 is derived.
 
@@ -33,7 +33,7 @@ The logic does not push weight on top of a warning sign.
 
 | Piece | For |
 |---|---|
-| TanStack Start (SPA) | File-based routing. No SSR — there is nothing a server could render |
+| TanStack Start (SPA) | File-based routing. No SSR, there is nothing a server could render |
 | TanStack DB + wa-sqlite | Real SQLite in the browser over OPFS; writes never touch the network |
 | Zod | Validates content at boot; the types are inferred from it |
 | Tailwind 4 · Biome · Vitest | Styles, formatting and lint, tests |
@@ -47,10 +47,10 @@ under TanStack Start's two-environment build.
 This repository is public and holds **code only**.
 
 ```
-content/           gitignored — your programme, your menu, your planning
+content/           gitignored: your programme, your menu, your planning
 data/              gitignored
 *.xlsx             gitignored
-content.example/   public — a generic sample so the repo runs
+content.example/   public: a generic sample so the repo runs
 ```
 
 Your logs live in the browser on your device, in OPFS. No server ever sees them.
